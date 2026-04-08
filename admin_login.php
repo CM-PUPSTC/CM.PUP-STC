@@ -106,7 +106,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         </div>
                     <?php endif; ?>
 
-                    <form action="/admin/" method="POST">
+                    <form action="admin_login.php" method="POST">
                         <div class="mb-3">
                             <input type="text" class="form-control" name="username" placeholder="User Name" required>
                         </div>
