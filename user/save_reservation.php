@@ -1,29 +1,56 @@
 <?php
 session_start();
 include('../connect.php');
+header('Content-Type: application/json');
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SESSION['student_id'])) {
-    
-    // We get these from the FormData sent by JavaScript
-    $student_no = mysqli_real_escape_string($conn, $_POST['student_no']); 
-    $room       = mysqli_real_escape_string($conn, $_POST['classroom']);
-    $date       = mysqli_real_escape_string($conn, $_POST['date']);
-    $start      = mysqli_real_escape_string($conn, $_POST['start']);
-    $end        = mysqli_real_escape_string($conn, $_POST['end']);
-    $purpose    = mysqli_real_escape_string($conn, $_POST['purpose']);
+$room    = $_POST['room']    ?? '';
+$date    = $_POST['date']    ?? '';
+$purpose = $_POST['purpose'] ?? '';
+$start   = !empty($_POST['start']) ? date("H:i:s", strtotime($_POST['start'])) : '';
+$end     = !empty($_POST['end'])   ? date("H:i:s", strtotime($_POST['end'])) : '';
+$account_no = $_SESSION['account_number'] ?? '';
 
-    // Matching your DB image: student_number, room_name, reservation_date, etc.
-    // We removed 'reference_no' because it wasn't in your table image.
-    $sql = "INSERT INTO reservations (student_number, room_name, reservation_date, start_time, end_time, purpose, status) 
-            VALUES ('$student_no', '$room', '$date', '$start', '$end', '$purpose', 'Pending')";
-
-    if (mysqli_query($conn, $sql)) {
-        echo json_encode(["status" => "success"]);
-    } else {
-        // This will help you debug if something is still wrong
-        echo json_encode(["status" => "error", "message" => mysqli_error($conn)]);
-    }
-} else {
-    echo json_encode(["status" => "error", "message" => "Unauthorized or Invalid Request"]);
+if (!$account_no) {
+    echo json_encode(['status' => 'error', 'message' => 'Session expired.']);
+    exit;
 }
-?>
+
+// --- STEP 1: CHECK FOR LIVE CONFLICTS ---
+// We check if someone is ALREADY 'Accepted' for this time
+$check_sql = "SELECT * FROM reservations 
+              WHERE room_name = ? 
+              AND reservation_date = ? 
+              AND status = 'Accepted'
+              AND (? < end_time AND ? > start_time)";
+
+$check_stmt = mysqli_prepare($conn, $check_sql);
+mysqli_stmt_bind_param($check_stmt, "ssss", $room, $date, $start, $end);
+mysqli_stmt_execute($check_stmt);
+$result = mysqli_stmt_get_result($check_stmt);
+
+// --- STEP 2: DECIDE THE STATUS ---
+// If rows > 0, someone is already there, so this new request is 'Pending' (Queue)
+// If rows == 0, the room is free, so this request is 'Accepted' (Live)
+$final_status = (mysqli_num_rows($result) > 0) ? 'Pending' : 'Accepted';
+
+// --- STEP 3: INSERT INTO DATABASE ---
+$sql = "INSERT INTO reservations (account_number, room_name, reservation_date, start_time, end_time, purpose, status) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)";
+
+$stmt = mysqli_prepare($conn, $sql);
+// Note: Added a 7th "s" for the $final_status
+mysqli_stmt_bind_param($stmt, "sssssss", $account_no, $room, $date, $start, $end, $purpose, $final_status);
+
+if (mysqli_stmt_execute($stmt)) {
+    $msg = ($final_status === 'Accepted') ? 'Reservation Confirmed!' : 'Room is occupied. You are now in the FCFS Queue.';
+    echo json_encode([
+        'status' => 'success',
+        'message' => $msg,
+        'reservation_status' => $final_status
+    ]);
+} else {
+    echo json_encode(['status' => 'error', 'message' => mysqli_error($conn)]);
+}
+
+mysqli_stmt_close($stmt);
+mysqli_close($conn);

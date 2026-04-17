@@ -1,22 +1,46 @@
 <?php
 session_start();
-include('../connect.php'); // Ensure your DB connection path is correct
+date_default_timezone_set('Asia/Manila');
+include('../connect.php');
 
-// 1. Get URL Parameters
-$ref = isset($_GET['ref']) ? $_GET['ref'] : 'N/A';
-$room = isset($_GET['room']) ? $_GET['room'] : 'N/A';
-$date_issued = date('F j, Y, g:i a');
+// 1. Get URL Parameters from the "Get Receipt" button
+$ref = isset($_GET['id']) ? mysqli_real_escape_string($conn, $_GET['id']) : (isset($_GET['ref']) ? mysqli_real_escape_string($conn, $_GET['ref']) : 'N/A');
 
-// 2. Fetch User Data from Database
-// Assuming you store the logged-in user's ID in $_SESSION['user_id']
-$user_id = $_SESSION['user_id'] ?? 1; // Fallback to 1 for testing
+// 2. Fetch User Data using the session variable from your login
+$session_user_id = $_SESSION['account_id'] ?? null;
 
-$user_query = "SELECT full_name, student_number FROM users WHERE id = '$user_id' LIMIT 1";
-$user_result = mysqli_query($conn, $user_query);
-$user_data = mysqli_fetch_assoc($user_result);
+if (!$session_user_id) {
+    die("Error: Please log in to view receipts.");
+}
 
-$full_name = $user_data['full_name'] ?? "Guest User";
-$student_no = $user_data['student_number'] ?? "N/A";
+// 3. JOIN tables to get Room details, User details, and Reservation details
+// Using account_number and room_name as the links
+$query = "SELECT r.*, u.section_name, u.account_number, c.location 
+          FROM reservations r
+          JOIN users u ON r.account_number = u.account_number
+          JOIN classrooms c ON r.room_name = c.room_name
+          WHERE r.id = '$ref' LIMIT 1";
+
+$result = mysqli_query($conn, $query);
+
+if ($result && mysqli_num_rows($result) > 0) {
+    $data = mysqli_fetch_assoc($result);
+
+    // FETCH THE ORIGINAL TIME FROM YOUR DATABASE COLUMN
+    // This uses the 'created_at' column shown in your screenshot
+    $date_issued = date('F j, Y, g:i a', strtotime($data['created_at']));
+
+    // The rest of your variables...
+    $room = $data['room_name'];
+    $location = $data['location'];
+    $res_date = date('M d, Y', strtotime($data['reservation_date']));
+    $time_slot = date('h:i A', strtotime($data['start_time'])) . " - " . date('h:i A', strtotime($data['end_time']));
+    $status = $data['status'];
+    $full_name = $data['section_name'];
+    $student_no = $data['account_number'];
+} else {
+    die("Error: Reservation record not found.");
+}
 ?>
 
 <!DOCTYPE html>
@@ -81,7 +105,6 @@ $student_no = $user_data['student_number'] ?? "N/A";
             color: #212529;
         }
 
-        /* Print rules */
         @media print {
             body {
                 background: white;
@@ -103,14 +126,13 @@ $student_no = $user_data['student_number'] ?? "N/A";
 </head>
 
 <body>
-
     <div class="container">
         <div class="receipt-card">
             <div class="text-center mb-5">
                 <img src="../img/PUPLogo.png" alt="PUP Logo" class="header-logo">
                 <h4 class="school-name mb-0">POLYTECHNIC UNIVERSITY OF THE PHILIPPINES</h4>
-                <p class="text-muted small">SANTO TOMAS BRANCH<br>Classroom Management System (CMS)</p>
-                <div class="status-stamp mt-2">Verified & Reserved</div>
+                <p class="text-muted small">STO. TOMAS CAMPUS<br>Classroom Management System (CMS)</p>
+                <div class="status-stamp mt-2"><?php echo $status; ?></div>
             </div>
 
             <hr>
@@ -118,7 +140,7 @@ $student_no = $user_data['student_number'] ?? "N/A";
             <div class="row mt-4">
                 <div class="col-6">
                     <div class="info-label">Reference Number</div>
-                    <div class="info-value text-primary"><?php echo htmlspecialchars($ref); ?></div>
+                    <div class="info-value text-primary">#CMS-<?php echo htmlspecialchars($ref); ?></div>
                 </div>
                 <div class="col-6 text-end">
                     <div class="info-label">Date Issued</div>
@@ -145,6 +167,10 @@ $student_no = $user_data['student_number'] ?? "N/A";
                                 </td>
                             </tr>
                             <tr>
+                                <td class="bg-light fw-bold small">Schedule</td>
+                                <td><strong><?php echo $res_date; ?></strong> | <?php echo $time_slot; ?></td>
+                            </tr>
+                            <tr>
                                 <td class="bg-light fw-bold small">Institution</td>
                                 <td>PUP Sto. Tomas Campus</td>
                             </tr>
@@ -156,22 +182,20 @@ $student_no = $user_data['student_number'] ?? "N/A";
             <div class="mt-5 p-3 bg-light rounded border">
                 <h6 class="small fw-bold text-dark"><i class="fas fa-exclamation-triangle me-2"></i>Important Reminders:</h6>
                 <ul class="mb-0 text-muted" style="font-size: 0.85rem;">
-                    <li>Please present this digital or printed receipt to <strong>Engr. Liza</strong> or the Classroom in-charge upon arrival.</li>
+                    <li>Please present this digital or printed receipt to <strong>Engr. Liza</strong> or the facility in-charge.</li>
                     <li>The reservation is valid only for the approved time slot.</li>
-                    <li>Ensure the Classroom is kept clean and equipment is handled with care.</li>
+                    <li>Ensure the classroom is kept clean and all equipment is handled with care.</li>
                 </ul>
             </div>
 
             <div class="text-center mt-5">
-                <p class="text-muted" style="font-size: 0.7rem;">This is a system-generated document from the PUPSTC-FMS.<br>No physical signature is required for initial verification.</p>
+                <p class="text-muted" style="font-size: 0.7rem;">This is a system-generated document from the PUPSTC-CMS.<br>No physical signature is required for verification.</p>
             </div>
 
             <div class="text-center mt-4 no-print">
                 <button onclick="window.print()" class="btn btn-dark px-4 py-2 shadow-sm">
                     <i class="fas fa-print me-2"></i>Print Receipt / Save as PDF
                 </button>
-                <br>
-                <a href="javascript:window.close();" class="btn btn-link text-muted mt-2 small text-decoration-none">Close Window</a>
             </div>
         </div>
     </div>

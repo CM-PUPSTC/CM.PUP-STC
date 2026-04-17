@@ -9,16 +9,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $password = mysqli_real_escape_string($conn, $_POST['password']);
 
     // Select the user
-    $sql = "SELECT * FROM users WHERE student_number = '$username' AND password = '$password'";
+    $sql = "SELECT * FROM users WHERE account_number = '$username' AND password = '$password'";
     $result = mysqli_query($conn, $sql);
 
     if (mysqli_num_rows($result) > 0) {
         $row = mysqli_fetch_assoc($result);
         
         // IMPORTANT: These names must match what you check in reservation.php
-        $_SESSION['student_id'] = $row['id']; 
-        $_SESSION['student_number'] = $row['student_number'];
-        $_SESSION['full_name'] = $row['full_name'];
+        $_SESSION['account_id'] = $row['id']; 
+        $_SESSION['account_number'] = $row['account_number'];
+        $_SESSION['section_name'] = $row['section_name'];
         
         // Regenerate session ID to prevent "Session Fixation" attacks
         session_regenerate_id(true);
@@ -26,7 +26,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         header("Location: user/index.php"); 
         exit();
     } else {
-        $error = "Invalid Student Number or Password";
+        $error = "Invalid Account Number or Password";
     }
 }
 ?>
@@ -111,7 +111,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                     <form action="login.php" method="POST">
                         <div class="mb-3">
-                            <input type="text" class="form-control" name="username" placeholder="Student Number" required>
+                            <input type="text" class="form-control" name="username" placeholder="Account Number" required>
                         </div>
 
                         <div class="mb-4">

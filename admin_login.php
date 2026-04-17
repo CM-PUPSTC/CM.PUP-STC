@@ -2,13 +2,15 @@
 session_start();
 include('connect.php');
 
+// REMOVED the role check from here because you aren't logged in yet!
+
 $error = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $username = mysqli_real_escape_string($conn, $_POST['username']);
     $password = mysqli_real_escape_string($conn, $_POST['password']);
 
-    // Query the admins table specifically
+    // Query the admins table
     $sql = "SELECT * FROM admins WHERE username = '$username' AND password = '$password'";
     $result = mysqli_query($conn, $sql);
 
@@ -17,9 +19,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         
         $_SESSION['admin_id'] = $row['id'];
         $_SESSION['admin_user'] = $row['username'];
-        $_SESSION['role'] = $row['role'];
+        $_SESSION['role'] = 'admin'; // Set the role here
         
-        // Redirect to the admin dashboard folder
+        session_regenerate_id(true);
+
         header("Location: admin/index.php"); 
         exit();
     } else {

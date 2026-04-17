@@ -1,48 +1,62 @@
 <?php
-// 1. START THE SESSION ENGINE FIRST
+// 1. START SESSION
 session_start();
 
-
+// 2. PREVENT CACHING (Important for security)
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 
-// Your existing security gate
-if (!isset($_SESSION['student_id'])) {
+// 3. THE SECURITY GATE (Check login immediately)
+if (!isset($_SESSION['account_id'])) {
     header("Location: ../login.php");
     exit();
 }
 
-// 2. THE SECURITY GATE (Block the Bypass)
-// This must happen before ANY other code runs.
-if (!isset($_SESSION['student_id'])) {
-    header("Location: ../login.php");
-    exit();
-}
-
-// 3. DATABASE CONNECTION
+// 4. DATABASE CONNECTION (Must be before any queries!)
 include('../connect.php');
 
-// 4. GET THE REAL LOGGED-IN USER ID
-// Use the session variable, not a hardcoded "1"
-$user_id = $_SESSION['student_id'];
-
-// 5. FETCH USER DATA
-// (Use mysqli_real_escape_string for security)
+// 5. DEFINE USER DATA
+$user_id = $_SESSION['account_id'];
 $clean_id = mysqli_real_escape_string($conn, $user_id);
-$user_query = "SELECT * FROM users WHERE id = '$clean_id' LIMIT 1";
-$user_result = mysqli_query($conn, $user_query);
+
+// 6. FETCH USER PROFILE
+$user_result = mysqli_query($conn, "SELECT * FROM users WHERE id = '$clean_id' LIMIT 1");
 $user_data = mysqli_fetch_assoc($user_result);
+$section_name = $user_data['section_name'] ?? "Guest User";
+// index.php
+$account_no = $_SESSION['account_number'];
+$query = "SELECT * FROM reservations WHERE account_number = '$account_no' ORDER BY created_at DESC";
+// This ensures they see Pending, Accepted, and Cancelled ones.
 
-$full_name = $user_data['full_name'] ?? "Guest User";
-$student_no = $user_data['student_number'] ?? "0000-00000-ST-0";
+// 7. FETCH ALL ACCEPTED RESERVATIONS (Occupied Slots)
+// Use 'reservation_date' to match your database
+$occ_query = "SELECT room_name, reservation_date, start_time, end_time FROM reservations WHERE status = 'Accepted'";
+$occ_result = mysqli_query($conn, $occ_query);
+$db_occupied = [];
 
-// 6. FETCH CLASSROOMS
-$query = "SELECT * FROM classrooms ORDER BY room_name ASC";
-$result = mysqli_query($conn, $query);
+if ($occ_result) {
+    while ($row = mysqli_fetch_assoc($occ_result)) {
+        // Use the correct column name here too
+        $key = $row['reservation_date'] . "_" . $row['room_name'];
+        $db_occupied[$key][] = [
+            'start' => substr($row['start_time'], 0, 5),
+            'end' => substr($row['end_time'], 0, 5)
+        ];
+    }
+}
+
+// 8. FETCH LOGGED-IN USER'S RESERVATION HISTORY
+// Change this to include all statuses
+$my_res_query = "SELECT * FROM reservations WHERE account_number = '$account_no' ORDER BY created_at DESC";
+$my_res_result = mysqli_query($conn, $my_res_query);
+
+// 9. FETCH CLASSROOM LIST
+$class_query = "SELECT * FROM classrooms ORDER BY room_name ASC";
+$class_result = mysqli_query($conn, $class_query);
 $classroom_list = [];
 
-while ($row = mysqli_fetch_assoc($result)) {
+while ($row = mysqli_fetch_assoc($class_result)) {
     $classroom_list[] = [
         "name" => $row['room_name'],
         "loc" => $row['location'],
@@ -184,11 +198,12 @@ while ($row = mysqli_fetch_assoc($result)) {
 <body>
 
     <nav class="navbar navbar-pup py-2 mb-4">
-        <div class="container-fluid px-3 px-md-4">
+        <div class="container-fluid px-2 px-md-4">
             <a class="navbar-brand text-white fw-bold d-flex align-items-center" href="#">
                 <img src="../img/PUPLogo.png" alt="Logo" width="35" height="35" class="me-2 d-inline-block align-top">
 
-                <span class="ms-2">PUP-STC Classroom Reservation</span>
+                <span class="ms-2 d-none d-sm-inline">PUP-STC Classroom Reservation</span>
+                <span class="ms-2 d-inline d-sm-none">PUP-STC</span>
 
             </a>
             <div class="dropdown">
@@ -196,17 +211,17 @@ while ($row = mysqli_fetch_assoc($result)) {
                     role="button" id="profileDropdown" data-bs-toggle="dropdown" aria-expanded="false" style="cursor: pointer;">
 
                     <span class="small me-2 d-none d-md-inline text-white">
-                        <?php echo $full_name; ?>
+                        <?php echo $section_name; ?>
                     </span>
 
-                    <img src="https://ui-avatars.com/api/?name=<?php echo urlencode($full_name); ?>&background=FFD700&color=800000"
+                    <img src="https://ui-avatars.com/api/?name=<?php echo urlencode($section_name); ?>&background=FFD700&color=800000"
                         class="rounded-circle" width="25" alt="Profile">
                 </div>
 
                 <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2" aria-labelledby="profileDropdown">
                     <li class="px-3 py-2">
-                        <div class="fw-bold small"><?php echo $full_name; ?></div>
-                        <div class="text-muted" style="font-size: 0.75rem;"><?php echo $student_no; ?></div>
+                        <div class="fw-bold small"><?php echo $section_name; ?></div>
+                        <div class="text-muted" style="font-size: 0.75rem;"><?php echo $account_no; ?></div>
                     </li>
                     <li>
                         <hr class="dropdown-divider">
@@ -231,7 +246,8 @@ while ($row = mysqli_fetch_assoc($result)) {
                     <span class="filter-label">Reservation Date</span>
                     <div class="input-group">
                         <span class="input-group-text bg-light"><i class="far fa-calendar-alt"></i></span>
-                        <input type="date" class="form-control" id="searchDate" value="2026-04-03" onchange="renderTable()">
+                        <input type="date" class="form-control" id="searchDate"
+                            value="<?php echo date('Y-m-d'); ?>" onchange="renderTable()">
                     </div>
                 </div>
 
@@ -370,8 +386,29 @@ while ($row = mysqli_fetch_assoc($result)) {
         var classrooms = <?php echo json_encode($classroom_list); ?>;
 
         // 2. STATE MANAGEMENT: For the current user session
-        var myReservations = [];
-        var occupiedSlots = {}; // Tracks bookings locally to prevent double-booking
+        // 2. STATE MANAGEMENT: Pass PHP data into JavaScript
+        // Locate this part in your script and update the status logic
+        var myReservations = <?php
+                                $history = [];
+                                if ($my_res_result && mysqli_num_rows($my_res_result) > 0) {
+                                    mysqli_data_seek($my_res_result, 0);
+                                    while ($row = mysqli_fetch_assoc($my_res_result)) {
+                                        $history[] = [
+                                            'classroom' => $row['room_name'],
+                                            'refNo'     => $row['id'],
+                                            'purpose'   => $row['purpose'],
+                                            'dateTime'  => date("M d", strtotime($row['reservation_date'])) . " (" .
+                                                date("h:i A", strtotime($row['start_time'])) . " - " .
+                                                date("h:i A", strtotime($row['end_time'])) . ")",
+                                            'status'    => $row['status'] // This will now fetch 'Cancelled' if admin deleted it
+                                        ];
+                                    }
+                                }
+                                echo json_encode($history);
+                                ?>;
+
+        // This replaces the old empty 'occupiedSlots' line you had
+        var occupiedSlots = <?php echo json_encode($db_occupied); ?>; // Tracks bookings locally to prevent double-booking
 
         var tableBody = document.getElementById('roomTableBody');
         var statusTableBody = document.getElementById('statusTableBody');
@@ -454,54 +491,36 @@ while ($row = mysqli_fetch_assoc($result)) {
             var purpose = document.getElementById('reservationPurpose').value;
 
             if (!start || !end) {
-                alert("Please select a time range.");
-                return;
-            }
-            if (start >= end) {
-                alert("End time must be after Start time.");
+                alert("Please select a time.");
                 return;
             }
 
-            var dateKey = date + "_" + classroom;
-            var existingBookings = occupiedSlots[dateKey] || [];
+            let formData = new FormData();
+            formData.append('room', classroom);
+            formData.append('date', date);
+            formData.append('start', start);
+            formData.append('end', end);
+            formData.append('purpose', purpose);
 
-            // Conflict Check Logic
-            var isConflict = existingBookings.some(booked => (start < booked.end && end > booked.start));
-
-            if (isConflict) {
-                alert("This time slot is already occupied. Please choose another time.");
-                return;
-            }
-
-            // Add to Queue with 'Pending' status
-            myReservations.push({
-                classroom: classroom,
-                dateTime: date + " | " + start + " - " + end,
-                purpose: purpose,
-                queueTime: new Date().getTime(),
-                submittedAt: new Date().toLocaleTimeString(),
-                status: 'Pending',
-                refNo: "REF-" + Math.floor(100000 + Math.random() * 900000)
-            });
-
-            // Update local occupied slots
-            if (!occupiedSlots[dateKey]) occupiedSlots[dateKey] = [];
-            occupiedSlots[dateKey].push({
-                start: start,
-                end: end
-            });
-
-            // Sort by First-Come First-Served
-            myReservations.sort((a, b) => a.queueTime - b.queueTime);
-
-            renderTable();
-            renderStatusTable();
-            bootstrap.Modal.getInstance(document.getElementById('confirmModal')).hide();
-
-            // Trigger the Auto-Accept process
-            autoProcessQueue();
+            // IMPORTANT: Ensure save_reservation.php is in the same folder as index.php
+            fetch('save_reservation.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.text()) // Changed from .json() temporarily to see errors
+                .then(data => {
+                    const jsonData = JSON.parse(data);
+                    if (jsonData.status === 'success') {
+                        // Tell them if they got the room or the queue
+                        let msg = (jsonData.reservation_status === 'Accepted') ?
+                            "Confirmed! Your reservation is live." :
+                            "Room occupied.";
+                        alert(msg);
+                        location.reload();
+                    }
+                })
+                .catch(error => console.error('Fetch Error:', error));
         }
-
         /**
          * Simulates the system auto-verifying and accepting the request
          */
@@ -519,47 +538,91 @@ while ($row = mysqli_fetch_assoc($result)) {
             }
         }
 
-        /**
-         * Renders the Status Table with "Processing" and "Receipt" functionality
-         */
-        function renderStatusTable() {
-            if (myReservations.length === 0) return;
+        // Inside your function that loops through the reservations
+        statusTableBody.innerHTML = myReservations.map((res, index) => {
+            let statusHtml = "";
+            let rowClass = "";
 
-            statusTableBody.innerHTML = myReservations.map((res, index) => {
-                let statusHtml = "";
-                let actionHtml = "";
+            // Normalize status for comparison
+            let currentStatus = res.status ? res.status.trim().toLowerCase() : "pending";
 
-                if (res.status === 'Accepted') {
-                    statusHtml = `<span class="badge bg-success shadow-sm"><i class="fas fa-check-circle me-1"></i>Confirmed</span>`;
-                    // Link to a receipt page (you can create receipt.php to handle this)
-                    actionHtml = `<a href="receipt.php?ref=${res.refNo}&room=${res.classroom}" target="_blank" class="btn btn-sm btn-dark mt-2 py-1 px-3">
+            if (currentStatus === 'accepted') {
+                statusHtml = `<span class="badge bg-success">Confirmed</span>`;
+                rowClass = "table-success";
+            } else if (currentStatus === 'pending') {
+                // This is the FCFS "Waiting Room"
+                statusHtml = `<span class="badge bg-info text-dark">In Queue</span>`;
+                rowClass = "table-warning";
+            } else if (currentStatus === 'cancelled') {
+                statusHtml = `<span class="badge bg-danger">Cancelled</span>`;
+                rowClass = "table-danger opacity-75";
+            }
+
+            return `
+        <tr class="align-middle ${rowClass}">
+            <td>${res.room_name}</td>
+            <td>${res.purpose}</td>
+            <td>${res.start_time} - ${res.end_time}</td>
+            <td class="text-center">${statusHtml}</td>
+        </tr>
+    `;
+        }).join('');
+
+/**
+ * Renders the Status Table for the student with Print Receipt button
+ */
+function renderStatusTable() {
+    if (myReservations.length === 0) {
+        statusTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted small italic">No active requests found.</td></tr>';
+        return;
+    }
+
+    statusTableBody.innerHTML = myReservations.map((res, index) => {
+        let statusHtml = "";
+        let rowClass = "";
+        let actionHtml = ""; 
+
+        // Normalize status
+        let currentStatus = res.status ? res.status.trim().toLowerCase() : "pending";
+
+        if (currentStatus === 'accepted') {
+            statusHtml = `<span class="badge bg-success shadow-sm"><i class="fas fa-check-circle me-1"></i>Confirmed</span>`;
+            rowClass = "table-success";
+            
+            // The Button Design placed inside actionHtml
+            actionHtml = `<div class="mt-2">
+                            <a href="receipt.php?id=${res.refNo}" target="_blank" class="btn btn-sm btn-dark py-1 px-3 shadow-sm border-0" style="font-size: 0.75rem;">
                                 <i class="fas fa-file-invoice me-1"></i>Get Receipt
-                              </a>`;
-                } else if (index === 0) {
-                    // Top of the queue but not yet accepted
-                    statusHtml = `<span class="badge bg-primary animate-pulse">Auto-Verifying...</span>`;
-                } else {
-                    // Lower in the queue
-                    statusHtml = `<span class="badge bg-secondary">In Queue (#${index + 1})</span>`;
-                }
-
-                return `
-                    <tr class="small align-middle ${res.status === 'Accepted' ? 'table-success' : ''}">
-                        <td class="ps-3 ps-md-4">
-                            <div class="fw-bold">${res.classroom}</div>
-                            <div class="text-muted" style="font-size: 0.7rem;">ID: ${res.refNo}</div>
-                            <div class="d-block d-md-none">${actionHtml}</div> 
-                        </td>
-                        <td class="d-none d-md-table-cell">
-                            ${res.purpose}<br>
-                            <div class="d-none d-md-block">${actionHtml}</div>
-                        </td>
-                        <td>${res.dateTime}</td>
-                        <td class="text-center">${statusHtml}</td>
-                    </tr>
-                `;
-            }).join('');
+                            </a>
+                          </div>`;
+        } else if (currentStatus === 'cancelled') {
+            statusHtml = `<span class="badge bg-danger">Cancelled</span>`;
+            rowClass = "table-danger opacity-75";
+        } else if (index === 0) {
+            statusHtml = `<span class="badge bg-primary animate-pulse">Auto-Verifying...</span>`;
+            rowClass = "table-warning";
+        } else {
+            statusHtml = `<span class="badge bg-info text-dark">In Queue (#${index + 1})</span>`;
+            rowClass = "table-warning";
         }
+
+        return `
+            <tr class="align-middle ${rowClass}">
+                <td class="ps-3 ps-md-4">
+                    <div class="fw-bold text-dark">${res.classroom}</div>
+                    <div class="text-muted" style="font-size: 0.7rem;">Ref: #CMS-${res.refNo}</div>
+                    <div class="d-block d-md-none">${actionHtml}</div>
+                </td>
+                <td class="d-none d-md-table-cell">
+                    <div class="small text-secondary">${res.purpose}</div>
+                    <div class="d-none d-md-block">${actionHtml}</div>
+                </td>
+                <td class="small">${res.dateTime}</td>
+                <td class="text-center">${statusHtml}</td>
+            </tr>
+        `;
+    }).join('');
+}
 
         /**
          * Handles search and category filtering
@@ -573,8 +636,9 @@ while ($row = mysqli_fetch_assoc($result)) {
             renderTable(filtered);
         }
 
-        // Initial Table Load
+        // Initial Table Loads
         renderTable();
+        renderStatusTable(); // Call the function we just fixed
     </script>
 
     <script>
