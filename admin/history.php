@@ -10,10 +10,11 @@ include('../connect.php');
 
 // We JOIN the tables from your ERD to get names instead of just IDs
 // Use LEFT JOIN so the row shows up even if IDs are missing
+// Check if your reservations table uses 'account_number' instead of 'user_id'
 $query = "SELECT r.*, u.account_number, u.section_name, c.room_name 
           FROM reservations r
-          LEFT JOIN users u ON r.user_id = u.id
-          LEFT JOIN classrooms c ON r.classroom_id = c.id
+          LEFT JOIN users u ON r.account_number = u.account_number
+          LEFT JOIN classrooms c ON r.room_name = c.room_name
           ORDER BY r.reservation_date DESC, r.start_time DESC";
 
 $result = mysqli_query($conn, $query);
