@@ -513,7 +513,7 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                     if (jsonData.status === 'success') {
                         // Tell them if they got the room or the queue
                         let msg = (jsonData.reservation_status === 'Accepted') ?
-                            "Confirmed! Your reservation is live." :
+                            "Confirmed! Your reservation is accepted" :
                             "Room occupied.";
                         alert(msg);
                         location.reload();
@@ -568,45 +568,45 @@ while ($row = mysqli_fetch_assoc($class_result)) {
     `;
         }).join('');
 
-/**
- * Renders the Status Table for the student with Print Receipt button
- */
-function renderStatusTable() {
-    if (myReservations.length === 0) {
-        statusTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted small italic">No active requests found.</td></tr>';
-        return;
-    }
+        /**
+         * Renders the Status Table for the student with Print Receipt button
+         */
+        function renderStatusTable() {
+            if (myReservations.length === 0) {
+                statusTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted small italic">No active requests found.</td></tr>';
+                return;
+            }
 
-    statusTableBody.innerHTML = myReservations.map((res, index) => {
-        let statusHtml = "";
-        let rowClass = "";
-        let actionHtml = ""; 
+            statusTableBody.innerHTML = myReservations.map((res, index) => {
+                let statusHtml = "";
+                let rowClass = "";
+                let actionHtml = "";
 
-        // Normalize status
-        let currentStatus = res.status ? res.status.trim().toLowerCase() : "pending";
+                // Normalize status
+                let currentStatus = res.status ? res.status.trim().toLowerCase() : "pending";
 
-        if (currentStatus === 'accepted') {
-            statusHtml = `<span class="badge bg-success shadow-sm"><i class="fas fa-check-circle me-1"></i>Confirmed</span>`;
-            rowClass = "table-success";
-            
-            // The Button Design placed inside actionHtml
-            actionHtml = `<div class="mt-2">
+                if (currentStatus === 'accepted') {
+                    statusHtml = `<span class="badge bg-success shadow-sm"><i class="fas fa-check-circle me-1"></i>Confirmed</span>`;
+                    rowClass = "table-success";
+
+                    // The Button Design placed inside actionHtml
+                    actionHtml = `<div class="mt-2">
                             <a href="receipt.php?id=${res.refNo}" target="_blank" class="btn btn-sm btn-dark py-1 px-3 shadow-sm border-0" style="font-size: 0.75rem;">
                                 <i class="fas fa-file-invoice me-1"></i>Get Receipt
                             </a>
                           </div>`;
-        } else if (currentStatus === 'cancelled') {
-            statusHtml = `<span class="badge bg-danger">Cancelled</span>`;
-            rowClass = "table-danger opacity-75";
-        } else if (index === 0) {
-            statusHtml = `<span class="badge bg-primary animate-pulse">Auto-Verifying...</span>`;
-            rowClass = "table-warning";
-        } else {
-            statusHtml = `<span class="badge bg-info text-dark">In Queue (#${index + 1})</span>`;
-            rowClass = "table-warning";
-        }
+                } else if (currentStatus === 'cancelled') {
+                    statusHtml = `<span class="badge bg-danger">Cancelled</span>`;
+                    rowClass = "table-danger opacity-75";
+                } else if (index === 0) {
+                    statusHtml = `<span class="badge bg-primary animate-pulse">Auto-Verifying...</span>`;
+                    rowClass = "table-warning";
+                } else {
+                    statusHtml = `<span class="badge bg-info text-dark">In Queue (#${index + 1})</span>`;
+                    rowClass = "table-warning";
+                }
 
-        return `
+                return `
             <tr class="align-middle ${rowClass}">
                 <td class="ps-3 ps-md-4">
                     <div class="fw-bold text-dark">${res.classroom}</div>
@@ -621,8 +621,8 @@ function renderStatusTable() {
                 <td class="text-center">${statusHtml}</td>
             </tr>
         `;
-    }).join('');
-}
+            }).join('');
+        }
 
         /**
          * Handles search and category filtering

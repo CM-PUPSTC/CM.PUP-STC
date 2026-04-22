@@ -110,7 +110,6 @@ while ($row = mysqli_fetch_assoc($result)) {
 
             .calendar-container {
                 margin-top: 20px;
-                /* Pull down so it doesn't overlap the nav on mobile */
                 padding: 15px;
             }
 
