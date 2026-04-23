@@ -183,7 +183,7 @@ while ($row = mysqli_fetch_assoc($result)) {
 
                     <div class="d-flex align-items-center mb-2">
                         <div style="width:12px; height:12px; background:var(--pup-maroon); border-radius:3px; margin-right:10px;"></div>
-                        <span class="small">Other Rooms</span>
+                        <span class="small">Classrooms</span>
                     </div>
 
                     <hr>
