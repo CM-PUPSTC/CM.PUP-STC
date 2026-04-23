@@ -153,7 +153,7 @@ while ($row = mysqli_fetch_assoc($result)) {
                 </li>
                 <li>
                     <a class="dropdown-item text-danger" href="../logout.php">
-                        <i class="fas fa-sign-out-alt me-2"></i> Logout
+                        <i class="fas fa-sign-out-alt me-2"></i> Sign out
                     </a>
                 </li>
             </ul>
