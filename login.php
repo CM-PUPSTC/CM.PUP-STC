@@ -37,7 +37,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Login | PUPSTC </title>
+    <title>Login | PUP-STC </title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -98,7 +98,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     <div class="text-center mb-4">
                         <img src="img/PUPLogo.png" alt="PUP Logo"
                             style="width: 70px; filter: drop-shadow(0 0 10px rgba(255,255,255,0.3));">
-                        <h3 class="mt-3 fw-bold">PUPSTC</h3>
+                        <h3 class="mt-3 fw-bold">PUP-STC</h3>
                         <p class="small opacity-75">Classroom Management System</p>
                     </div>
 
