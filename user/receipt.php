@@ -1,6 +1,7 @@
 <?php
 session_start();
 date_default_timezone_set('Asia/Manila');
+/** @var mysqli $conn */
 include('../connect.php');
 
 // 1. Get URL Parameters from the "Get Receipt" button
@@ -13,11 +14,9 @@ if (!$session_user_id) {
     die("Error: Please log in to view receipts.");
 }
 
-// 3. JOIN tables to get Room details, User details, and Reservation details
-// Using account_number and room_name as the links
-$query = "SELECT r.*, u.section_name, u.account_number, c.location 
+$query = "SELECT r.*, u.section_name, u.id_number, c.location 
           FROM reservations r
-          JOIN users u ON r.account_number = u.account_number
+          JOIN users u ON r.id_number = u.id_number
           JOIN classrooms c ON r.room_name = c.room_name
           WHERE r.id = '$ref' LIMIT 1";
 
@@ -37,7 +36,7 @@ if ($result && mysqli_num_rows($result) > 0) {
     $time_slot = date('h:i A', strtotime($data['start_time'])) . " - " . date('h:i A', strtotime($data['end_time']));
     $status = $data['status'];
     $full_name = $data['section_name'];
-    $student_no = $data['account_number'];
+    $student_no = $data['id_number'];
 } else {
     die("Error: Reservation record not found.");
 }

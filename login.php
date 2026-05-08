@@ -8,25 +8,39 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $username = mysqli_real_escape_string($conn, $_POST['username']);
     $password = mysqli_real_escape_string($conn, $_POST['password']);
 
-    // Select the user
-    $sql = "SELECT * FROM users WHERE account_number = '$username' AND password = '$password'";
+    // Fetch user by ID number
+    $sql = "SELECT * FROM users WHERE id_number = '$username'";
     $result = mysqli_query($conn, $sql);
 
     if (mysqli_num_rows($result) > 0) {
         $row = mysqli_fetch_assoc($result);
         
-        // IMPORTANT: These names must match what you check in reservation.php
-        $_SESSION['account_id'] = $row['id']; 
-        $_SESSION['account_number'] = $row['account_number'];
-        $_SESSION['section_name'] = $row['section_name'];
-        
-        // Regenerate session ID to prevent "Session Fixation" attacks
-        session_regenerate_id(true);
+        // Use password_verify if you hashed the passwords, 
+        // otherwise keep your original string comparison logic:
+        if ($password === $row['password']) { 
+            
+            // Set Session Variables
+            $_SESSION['account_id'] = $row['id']; 
+            $_SESSION['account_number'] = $row['id_number'];
+            $_SESSION['name'] = $row['name']; // Store name for the Prof Dashboard
+            $_SESSION['role'] = $row['role']; 
+            
+            session_regenerate_id(true);
 
-        header("Location: user/index.php"); 
-        exit();
+            // --- ROLE-BASED REDIRECTION ---
+            if ($row['role'] === 'admin') {
+                header("Location: admin/index.php");
+            } elseif ($row['role'] === 'professor') {
+                header("Location: professor/index.php");
+            } else {
+                header("Location: user/index.php"); // Default for students
+            }
+            exit();
+        } else {
+            $error = "Invalid Password";
+        }
     } else {
-        $error = "Invalid Account Number or Password";
+        $error = "Invalid ID Number";
     }
 }
 ?>

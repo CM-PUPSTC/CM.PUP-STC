@@ -1,4 +1,5 @@
 <?php
+/** @var mysqli $conn */
 include('../connect.php');
 
 $id     = $_POST['id'] ?? '';

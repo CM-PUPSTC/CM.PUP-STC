@@ -1,5 +1,6 @@
 <?php
 session_start();
+/** @var mysqli $conn */
 include('../connect.php');
 header('Content-Type: application/json');
 
