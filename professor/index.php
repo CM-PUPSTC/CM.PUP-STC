@@ -8,7 +8,6 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'professor') {
 /** @var mysqli $conn */
 include('../connect.php');
 $prof_name = $_SESSION['name'];
-// Change this line in your Dashboard PHP
 $account_no = $_SESSION['account_number'] ?? 'N/A';
 
 // Fetch the Professor's Schedule
@@ -51,7 +50,7 @@ $result = $stmt->get_result();
         .table-container {
             background: white;
             border-radius: 15px;
-            padding: 25px;
+            padding: 20px;
             border: 1px solid #e0e0e0;
         }
 
@@ -69,6 +68,54 @@ $result = $stmt->get_result();
             color: var(--pup-maroon);
             border: 1px solid rgba(128, 0, 0, 0.1);
         }
+
+        /* --- Responsive Table Fix --- */
+        @media (max-width: 767.98px) {
+            .table-responsive thead {
+                display: none; /* Hide headers on mobile */
+            }
+
+            .table-responsive tr {
+                display: block;
+                margin-bottom: 1.5rem;
+                border: 1px solid #dee2e6;
+                border-radius: 10px;
+                padding: 10px;
+                background: #fff;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            }
+
+            .table-responsive td {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                text-align: right;
+                border-bottom: 1px solid #eee;
+                padding: 10px 5px;
+            }
+
+            .table-responsive td:last-child {
+                border-bottom: none;
+                display: block;
+                text-align: center;
+            }
+
+            /* Add labels for mobile view */
+            .table-responsive td::before {
+                content: attr(data-label);
+                font-weight: bold;
+                text-transform: uppercase;
+                font-size: 0.75rem;
+                color: #6c757d;
+                float: left;
+                margin-right: 10px;
+            }
+            
+            .btn-cancel {
+                width: 100%;
+                margin-top: 10px;
+            }
+        }
     </style>
 </head>
 
@@ -82,7 +129,8 @@ $result = $stmt->get_result();
             </a>
             <div class="dropdown">
                 <div class="d-flex align-items-center bg-white bg-opacity-10 rounded-pill px-3 py-1 dropdown-toggle user-pill" data-bs-toggle="dropdown">
-                    <span class="small me-2 text-white d-none d-md-inline"><?php echo htmlspecialchars($prof_name); ?></span>
+                    <!-- Name hidden on very small screens to save space -->
+                    <span class="small me-2 text-white d-none d-sm-inline"><?php echo htmlspecialchars($prof_name); ?></span>
                     <img src="https://ui-avatars.com/api/?name=<?php echo urlencode($prof_name); ?>&background=FFD700&color=800000" class="rounded-circle" width="28">
                 </div>
                 <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2">
@@ -90,9 +138,7 @@ $result = $stmt->get_result();
                         <div class="fw-bold"><?php echo htmlspecialchars($prof_name); ?></div>
                         <div class="text-muted small">ID: <?php echo htmlspecialchars($account_no); ?></div>
                     </li>
-                    <li>
-                        <hr class="dropdown-divider">
-                    </li>
+                    <li><hr class="dropdown-divider"></li>
                     <li><a class="dropdown-item text-danger small" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i>Sign Out</a></li>
                 </ul>
             </div>
@@ -108,12 +154,14 @@ $result = $stmt->get_result();
         <?php endif; ?>
 
         <div class="table-container shadow-sm">
-            <div class="d-flex justify-content-between align-items-center mb-4">
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
                 <h5 class="fw-bold m-0 text-dark"><i class="fas fa-chalkboard-teacher me-2 text-maroon"></i>My Academic Load</h5>
-                <span class="badge bg-light text-dark border px-3 py-2"><?php echo date('l, F d'); ?></span>
+                <span class="badge bg-light text-dark border px-3 py-2 w-auto align-self-start">
+                    <i class="far fa-calendar-alt me-1"></i> <?php echo date('l, F d'); ?>
+                </span>
             </div>
 
-            <div class="table-responsive">
+            <div class="table-responsive" style="overflow-x: visible;">
                 <table class="table table-hover align-middle">
                     <thead class="bg-light">
                         <tr class="small text-uppercase text-muted">
@@ -128,20 +176,22 @@ $result = $stmt->get_result();
                         <?php if ($result->num_rows > 0): ?>
                             <?php while ($row = $result->fetch_assoc()): ?>
                                 <tr>
-                                    <td class="ps-3 fw-bold text-maroon"><?php echo $row['day_of_week']; ?></td>
-                                    <td>
+                                    <td class="ps-md-3 fw-bold text-maroon" data-label="Day"><?php echo $row['day_of_week']; ?></td>
+                                    <td data-label="Subject">
                                         <div class="fw-bold"><?php echo $row['subject_code']; ?></div>
                                         <div class="text-muted small"><?php echo $row['section_name']; ?></div>
                                     </td>
-                                    <td>
+                                    <td data-label="Schedule">
                                         <div class="small fw-bold text-dark">
                                             <?php echo date("h:i A", strtotime($row['start_time'])); ?> -
                                             <?php echo date("h:i A", strtotime($row['end_time'])); ?>
                                         </div>
                                     </td>
-                                    <td><span class="badge rounded-pill badge-room px-3"><?php echo $row['room_name']; ?></span></td>
-                                    <td class="text-end pe-3">
-                                        <button class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold"
+                                    <td data-label="Room">
+                                        <span class="badge rounded-pill badge-room px-3"><?php echo $row['room_name']; ?></span>
+                                    </td>
+                                    <td class="text-md-end pe-md-3">
+                                        <button class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold btn-cancel"
                                             onclick="openCancelModal(<?php echo $row['id']; ?>, '<?php echo $row['subject_code']; ?>', '<?php echo $row['day_of_week']; ?>')">
                                             <i class="fas fa-times-circle me-1"></i> Cancel Session
                                         </button>
@@ -159,8 +209,9 @@ $result = $stmt->get_result();
         </div>
     </div>
 
+    <!-- Modal (Remains mostly the same, Bootstrap modals are responsive by default) -->
     <div class="modal fade" id="cancelModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered mx-3 mx-sm-auto">
             <div class="modal-content border-0 shadow-lg">
                 <form action="process_cancel_class.php" method="POST">
                     <div class="modal-header border-0 bg-danger text-white">
@@ -181,14 +232,11 @@ $result = $stmt->get_result();
                             <label class="form-label small fw-bold">Effective Date</label>
                             <input type="date" name="cancelled_date" class="form-control form-control-lg"
                                 value="<?php echo date('Y-m-d'); ?>" required>
-                            <div class="form-text text-danger mt-2" style="font-size: 0.75rem;">
-                                <i class="fas fa-info-circle me-1"></i> Note: This room will become available for reservations once cancelled.
-                            </div>
                         </div>
                     </div>
-                    <div class="modal-footer border-0 bg-light">
-                        <button type="button" class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">Keep Session</button>
-                        <button type="submit" name="confirm_cancel" class="btn btn-danger rounded-pill px-4 shadow">Confirm Cancellation</button>
+                    <div class="modal-footer border-0 bg-light d-flex flex-column flex-sm-row">
+                        <button type="button" class="btn btn-secondary rounded-pill px-4 w-100 w-sm-auto mb-2 mb-sm-0" data-bs-dismiss="modal">Keep Session</button>
+                        <button type="submit" name="confirm_cancel" class="btn btn-danger rounded-pill px-4 shadow w-100 w-sm-auto">Confirm</button>
                     </div>
                 </form>
             </div>
@@ -207,5 +255,4 @@ $result = $stmt->get_result();
         }
     </script>
 </body>
-
 </html>
