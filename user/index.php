@@ -262,11 +262,13 @@ while ($row = mysqli_fetch_assoc($class_result)) {
         <div class="classroom-card p-0 overflow-hidden mb-5">
             <div class="table-responsive">
                 <table class="table align-middle mb-0">
-                    <thead class="table-light small text-uppercase">
-                        <tr>
-                            <th class="ps-4">Classroom</th>
-                            <th>Date & Time</th>
-                            <th class="text-center">Verification</th>
+                    <thead>
+                        <tr class="align-middle">
+                            <th class="ps-4 py-3" style="width: 40%;">CLASSROOM</th>
+
+                            <th class="py-3" style="width: 35%;">DATE & TIME</th>
+
+                            <th class="text-center py-3" style="width: 25%;">VERIFICATION</th>
                         </tr>
                     </thead>
                     <tbody id="statusTableBody"></tbody>
