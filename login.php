@@ -15,9 +15,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (mysqli_num_rows($result) > 0) {
         $row = mysqli_fetch_assoc($result);
         
-        // Use password_verify if you hashed the passwords, 
-        // otherwise keep your original string comparison logic:
-        if ($password === $row['password']) { 
+        /* ====================================================================
+           UPDATED: SMART PASSWORD VERIFICATION
+           Checks via password_verify() first (for hashes), 
+           and falls back to === plain text (for older accounts).
+           ==================================================================== */
+        if (password_verify($password, $row['password']) || $password === $row['password']) { 
             
             // Set Session Variables
             $_SESSION['account_id'] = $row['id']; 
@@ -44,7 +47,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 }
 ?>
-
 <!doctype html>
 <html lang="en">
 

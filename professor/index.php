@@ -72,7 +72,8 @@ $result = $stmt->get_result();
         /* --- Responsive Table Fix --- */
         @media (max-width: 767.98px) {
             .table-responsive thead {
-                display: none; /* Hide headers on mobile */
+                display: none;
+                /* Hide headers on mobile */
             }
 
             .table-responsive tr {
@@ -82,7 +83,7 @@ $result = $stmt->get_result();
                 border-radius: 10px;
                 padding: 10px;
                 background: #fff;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
             }
 
             .table-responsive td {
@@ -110,7 +111,7 @@ $result = $stmt->get_result();
                 float: left;
                 margin-right: 10px;
             }
-            
+
             .btn-cancel {
                 width: 100%;
                 margin-top: 10px;
@@ -135,10 +136,11 @@ $result = $stmt->get_result();
                 </div>
                 <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2">
                     <li class="px-3 py-2 text-center">
-                        <div class="fw-bold"><?php echo htmlspecialchars($prof_name); ?></div>
                         <div class="text-muted small">ID: <?php echo htmlspecialchars($account_no); ?></div>
                     </li>
-                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <hr class="dropdown-divider">
+                    </li>
                     <li><a class="dropdown-item text-danger small" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i>Sign Out</a></li>
                 </ul>
             </div>
@@ -155,7 +157,7 @@ $result = $stmt->get_result();
 
         <div class="table-container shadow-sm">
             <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
-                <h5 class="fw-bold m-0 text-dark"><i class="fas fa-chalkboard-teacher me-2 text-maroon"></i>My Academic Load</h5>
+                <h5 class="fw-bold m-0 text-dark"><i class="fas fa-chalkboard-teacher me-2 text-maroon"></i>Scheduled Classes</h5>
                 <span class="badge bg-light text-dark border px-3 py-2 w-auto align-self-start">
                     <i class="far fa-calendar-alt me-1"></i> <?php echo date('l, F d'); ?>
                 </span>
@@ -248,11 +250,12 @@ $result = $stmt->get_result();
         function openCancelModal(id, subject, day) {
             document.getElementById('modalSchedId').value = id;
             document.getElementById('modalSubject').innerText = subject;
-            document.getElementById('modalDayDisplay').innerText = "Every " + day;
+            document.getElementById('modalDayDisplay').innerText = day;
 
             var myModal = new bootstrap.Modal(document.getElementById('cancelModal'));
             myModal.show();
         }
     </script>
 </body>
+
 </html>

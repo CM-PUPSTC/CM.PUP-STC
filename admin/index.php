@@ -10,42 +10,57 @@ include('../connect.php');
 // --- DATABASE HANDLERS ---
 
 // Add New Room
-// Add New Room (Now pointing to 'classrooms')
 if (isset($_POST['add_room'])) {
     $new_room = mysqli_real_escape_string($conn, $_POST['room_name']);
-    // Removed location/image for simplicity, but table 'classrooms' requires them or default values
     $conn->query("INSERT IGNORE INTO classrooms (room_name, location) VALUES ('$new_room', 'Main Building')");
     header("Location: index.php?msg=RoomAdded");
     exit();
 }
 
 // Add New Professor
-// Add New Professor (Now pointing to 'users' with role 'professor')
 if (isset($_POST['add_prof'])) {
     $new_prof = mysqli_real_escape_string($conn, $_POST['prof_name']);
-    $temp_pass = password_hash('123456', PASSWORD_DEFAULT); // Give them a default password
-    $prof_id = "PROF-" . rand(1000, 9999); // Generate a temporary ID number
+    $department = mysqli_real_escape_string($conn, $_POST['department']);
+    
+    // CHANGED: Changed '123456' to 'prof123' so it automatically hashes 'prof123' instead
+    $temp_pass = password_hash('prof123', PASSWORD_DEFAULT);
+    
+    $prof_id = "PROF-" . date('Y') . "-" . rand(1000, 9999);
 
-    $conn->query("INSERT IGNORE INTO users (id_number, name, password, role) 
-                  VALUES ('$prof_id', '$new_prof', '$temp_pass', 'professor')");
-    header("Location: index.php?msg=ProfAdded");
+    // Saving department inside the section_name column
+    $conn->query("INSERT IGNORE INTO users (id_number, name, password, role, section_name) 
+                  VALUES ('$prof_id', '$new_prof', '$temp_pass', 'professor', '$department')");
+    header("Location: index.php?msg=ProfAdded&id=" . $prof_id);
     exit();
 }
+
 // --- DATA FETCHING ---
+// Updated: Added 'Reservation' as subject_name and cs.subject_name to pull your new column row data cleanly!
 $query = "
     SELECT id, room_name, reservation_date AS event_date, start_time, end_time, 
-           'N/A' as subject_code, 'Reservation' as section_name, 'Reservation' as type 
+           'N/A' as subject_code, 'Reservation' as subject_name, 'Reservation' as section_name, 'N/A' as professor_name, 
+           'Reservation' as type, NULL as schedule_id, NULL as is_cancelled_date
     FROM reservations 
     WHERE status = 'Accepted'
-    UNION
-    SELECT id, room_name, day_of_week AS event_date, start_time, end_time, 
-           subject_code, section_name, 'Schedule' as type 
-    FROM class_schedules
+    
+    UNION ALL
+    
+    SELECT cs.id, cs.room_name, cs.day_of_week AS event_date, cs.start_time, cs.end_time, 
+           cs.subject_code, cs.subject_name, cs.section_name, cs.professor_name, 'Schedule' as type,
+           cs.id as schedule_id, cc.cancelled_date as is_cancelled_date
+    FROM class_schedules cs
+    LEFT JOIN cancelled_classes cc ON cs.id = cc.schedule_id
 ";
 $result = mysqli_query($conn, $query);
 
 $calendar_events = [];
 while ($row = mysqli_fetch_assoc($result)) {
+    // NEW CHECKPOINT: If this specific row represents a class that was cancelled for a date, 
+    // skip adding it to the calendar array so it disappears from the admin dashboard!
+    if ($row['type'] === 'Schedule' && !empty($row['is_cancelled_date'])) {
+        continue; 
+    }
+
     $color = '#800000';
     $room = strtolower($row['room_name']);
     if (strpos($room, 'lab') !== false) {
@@ -63,8 +78,11 @@ while ($row = mysqli_fetch_assoc($result)) {
         'borderColor' => $color,
         'display' => 'block',
         'extendedProps' => [
-            'subject' => $row['subject_code'],
-            'section' => $row['section_name']
+            'subject'      => $row['subject_code'],
+            'subject_name' => $row['subject_name'], // <-- CHANGED: Now passing the descriptive subject name out!
+            'section'      => $row['section_name'],
+            'professor'    => $row['professor_name'],
+            'type'         => $row['type'] // Helps your JavaScript differentiate scripts
         ]
     ];
 
@@ -81,15 +99,17 @@ while ($row = mysqli_fetch_assoc($result)) {
         $event['end'] = $row['event_date'] . 'T' . $row['end_time'];
     }
     $calendar_events[] = $event;
-}
+} 
 
 $rooms_res = $conn->query("SELECT room_name FROM classrooms ORDER BY room_name ASC");
 $rooms_array = [];
 while ($r = $rooms_res->fetch_assoc()) {
     $rooms_array[] = $r['room_name'];
 }
-?>
 
+// 1. ADDED FOR STEP B: Fetch professors list to populate our data layout
+$professors_res = $conn->query("SELECT id_number, name, section_name FROM users WHERE role = 'professor' ORDER BY name ASC");
+?>
 <!DOCTYPE html>
 <html lang="en">
 
@@ -210,25 +230,21 @@ while ($r = $rooms_res->fetch_assoc()) {
             padding: 6px 15px;
         }
 
-        /* Mobile-specific adjustments */
         @media (max-width: 767px) {
             .calendar-container {
                 padding: 10px;
             }
 
-            /* Center the title and buttons on mobile */
             .fc-toolbar {
                 flex-direction: column;
                 gap: 10px;
             }
 
-            /* Make buttons larger for touch */
             .fc-button {
                 padding: 8px 16px !important;
             }
         }
 
-        /* Custom Day Header style (no numbers) */
         .fc-col-header-cell-cushion {
             text-decoration: none !important;
             color: var(--pup-maroon) !important;
@@ -236,7 +252,6 @@ while ($r = $rooms_res->fetch_assoc()) {
             font-weight: 700;
         }
 
-        /* Hide empty button containers that cause those gray blocks */
         .fc .fc-button-group>.fc-button:empty {
             display: none !important;
         }
@@ -247,7 +262,6 @@ while ($r = $rooms_res->fetch_assoc()) {
             justify-content: center;
         }
 
-        /* Ensure the arrows are clean on mobile */
         @media (max-width: 767px) {
             .fc-toolbar {
                 display: flex !important;
@@ -256,9 +270,71 @@ while ($r = $rooms_res->fetch_assoc()) {
                 gap: 8px;
             }
 
-            /* This fixes the gray blocks under the Change Room button */
             .fc-toolbar-chunk:empty {
                 display: none !important;
+            }
+        }
+
+        /* RESPONSIVE FACULTY DIRECTORY */
+        @media (max-width: 767px) {
+
+            /* Hide the traditional table header layout on mobile */
+            .table-responsive thead {
+                display: none;
+            }
+
+            /* Force table elements to behave like block cards */
+            .table-responsive table,
+            .table-responsive tbody,
+            .table-responsive tr,
+            .table-responsive td {
+                display: block;
+                width: 100%;
+            }
+
+            /* Separate each professor row into an independent card block */
+            .table-responsive tr {
+                background: #ffffff;
+                border: 1px solid #e0e0e0;
+                border-radius: 10px;
+                padding: 12px;
+                margin-bottom: 12px;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.02);
+            }
+
+            /* Remove default padding borders between cells */
+            .table-responsive td {
+                text-align: left;
+                padding: 6px 4px !important;
+                border: none !important;
+            }
+
+            /* Use data-label attributes to add a clean pseudo-header on the left */
+            .table-responsive td::before {
+                content: attr(data-label);
+                float: left;
+                font-weight: 700;
+                text-transform: uppercase;
+                font-size: 0.75rem;
+                color: #6c757d;
+                width: 40%;
+            }
+
+            /* Align the data contents cleanly to the right of our label */
+            .table-responsive td>div,
+            .table-responsive td>code,
+            .table-responsive td>span {
+                display: inline-block;
+                width: 60%;
+            }
+
+            /* Fix centering for account status badge alignment */
+            .table-responsive td.text-center {
+                text-align: left !important;
+            }
+
+            .table-responsive td.text-center::before {
+                content: attr(data-label);
             }
         }
     </style>
@@ -284,12 +360,19 @@ while ($r = $rooms_res->fetch_assoc()) {
         </div>
     </nav>
 
+    <?php if (isset($_GET['msg']) && $_GET['msg'] === 'ProfAdded' && isset($_GET['id'])): ?>
+        <div class="container-fluid px-4 mb-3">
+            <div class="alert alert-success alert-dismissible fade show shadow-sm border-start border-success border-4" role="alert">
+                <i class="fas fa-check-circle me-2"></i><strong>Professor Registered!</strong> Account generated with ID: <code class="bg-dark text-white px-2 py-0.5 rounded"><?php echo htmlspecialchars($_GET['id']); ?></code> (Default Pass: <code>prof123</code>).
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <div class="container-fluid px-4">
         <div class="row">
-            <!-- SIDEBAR -->
             <div class="col-lg-3 col-xl-2">
                 <div class="sidebar-card p-3 mb-4">
-
                     <span class="section-label">Current View</span>
                     <div class="active-room-box">
                         <small class="text-muted d-block">Target Room:</small>
@@ -301,29 +384,71 @@ while ($r = $rooms_res->fetch_assoc()) {
                     </button>
 
                     <span class="section-label">Management</span>
-
                     <button class="btn-mgmt" data-bs-toggle="modal" data-bs-target="#roomModal">
                         <i class="fas fa-door-open"></i> Add New Room
                     </button>
-
                     <button class="btn-mgmt" data-bs-toggle="modal" data-bs-target="#profModal">
                         <i class="fas fa-user-tie"></i> Add Professor
                     </button>
-
-
                 </div>
             </div>
 
-            <!-- CALENDAR -->
             <div class="col-lg-9 col-xl-10">
                 <div class="calendar-container">
                     <div id="calendar"></div>
+                </div>
+
+                <div class="card border-0 shadow-sm mt-4 mb-5" style="border-radius: 15px;">
+                    <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
+                        <h5 class="fw-bold m-0 text-dark"><i class="fas fa-user-tie me-2" style="color: var(--pup-maroon);"></i>Registered Faculty</h5>
+                        <span class="badge bg-light text-dark border fw-semibold"><?php echo $professors_res->num_rows; ?> Total Professors</span>
+                    </div>
+                    <div class="table-responsive px-4 pb-4">
+                        <table class="table align-middle table-hover mb-0">
+                            <thead class="table-light small text-uppercase fw-bold text-muted">
+                                <tr>
+                                    <th>Professor Name</th>
+                                    <th>Generated Account ID</th>
+                                    <th>Department</th>
+                                    <th class="text-center">Account Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if ($professors_res->num_rows > 0): ?>
+                                    <?php while ($prof = $professors_res->fetch_assoc()): ?>
+                                        <tr>
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    <div class="rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 35px; height: 35px; background: #fff5f5;">
+                                                        <i class="fas fa-user text-danger small"></i>
+                                                    </div>
+                                                    <span class="fw-bold text-secondary small"><?php echo htmlspecialchars($prof['name']); ?></span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <code class="fw-bold text-dark bg-light px-2 py-1 rounded border"><?php echo htmlspecialchars($prof['id_number']); ?></code>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-light text-secondary border small"><?php echo htmlspecialchars($prof['section_name'] ?? 'General Faculty'); ?></span>
+                                            </td>
+                                            <td class="text-center">
+                                                <span class="small text-success fw-bold"><i class="fas fa-circle me-1 small" style="font-size: 0.5rem;"></i> Active</span>
+                                            </td>
+                                        </tr>
+                                    <?php endwhile; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="4" class="text-center py-4 text-muted small">No professor accounts found in the system. Use the sidebar button to add one.</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- MODAL: ADD ROOM -->
     <div class="modal fade" id="roomModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-0 shadow">
@@ -346,7 +471,6 @@ while ($r = $rooms_res->fetch_assoc()) {
         </div>
     </div>
 
-    <!-- MODAL: ADD PROFESSOR -->
     <div class="modal fade" id="profModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-0 shadow">
@@ -354,7 +478,7 @@ while ($r = $rooms_res->fetch_assoc()) {
                     <h5 class="modal-title"><i class="fas fa-user-plus me-2"></i>Add Professor Profile</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form method="POST">
+                <form action="" method="POST">
                     <div class="modal-body p-4">
                         <div class="mb-3">
                             <label class="form-label fw-bold">Full Name</label>
@@ -362,11 +486,11 @@ while ($r = $rooms_res->fetch_assoc()) {
                         </div>
                         <div class="mb-0">
                             <label class="form-label fw-bold">Department</label>
-                            <select name="department" class="form-select">
-                                <option value="IT">Information Technology</option>
-                                <option value="Engineering">Engineering</option>
-                                <option value="Education">Education</option>
-                                <option value="Business">Business</option>
+                            <select name="department" class="form-select" required>
+                                <option value="IT Department">Information Technology</option>
+                                <option value="Engineering Department">Engineering</option>
+                                <option value="Education Department">Education</option>
+                                <option value="Business Department">Business</option>
                             </select>
                         </div>
                     </div>
@@ -379,7 +503,6 @@ while ($r = $rooms_res->fetch_assoc()) {
         </div>
     </div>
 
-    <!-- MODAL: UPLOAD CSV -->
     <div class="modal fade" id="uploadModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-0 shadow">
@@ -413,14 +536,12 @@ while ($r = $rooms_res->fetch_assoc()) {
             const roomsList = <?php echo json_encode($rooms_array); ?>;
             const isMobile = window.innerWidth < 768;
 
-            // 1. Create a reusable injection function
             function injectRoomButton() {
                 let roomOptions = "";
                 roomsList.forEach(r => {
                     roomOptions += `<li><a class="dropdown-item" href="#" onclick="updateTargetRoom('${r}')">${r}</a></li>`;
                 });
 
-                // Target the specific chunk where 'roomSelectorBtn' is supposed to be
                 const toolbarLeft = document.querySelector('.fc-toolbar-chunk:first-child');
                 if (toolbarLeft) {
                     toolbarLeft.innerHTML = `
@@ -443,30 +564,33 @@ while ($r = $rooms_res->fetch_assoc()) {
                 eventContent: function(arg) {
                     let subject = arg.event.extendedProps.subject || '';
                     let section = arg.event.extendedProps.section || '';
+                    let professor = arg.event.extendedProps.professor || ''; // <-- Fetch the prof name
+
+                    // If it's a schedule, format a small layout string for the professor
+                    let profDisplay = (professor !== 'N/A' && professor !== '') ? `<div style="font-size: 1.1em; font-style: italic; opacity: 0.85;"><i class="fas fa-user-tie me-1"></i>${professor}</div>` : '';
 
                     return {
                         html: `
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; text-align: center;">
-                    <div style="font-size: 1.5em; font-weight: bold;">${arg.timeText}</div>
-                    <div style="font-size: 1.5em; font-weight: 800; text-transform: uppercase;">${subject}</div>
-                    <div style="font-size: 1.5em; opacity: 0.9;">${section}</div>
-                </div>
-            `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; text-align: center; padding: 2px;">
+                <div style="font-size: 1.3em; font-weight: bold;">${arg.timeText}</div>
+                <div style="font-size: 1.4em; font-weight: 800; text-transform: uppercase;">${subject}</div>
+                <div style="font-size: 1.2em; opacity: 0.9;">${section}</div>
+                ${profDisplay} 
+            </div>
+        `
                     };
                 },
 
                 headerToolbar: {
-                    left: 'roomSelectorBtn', // This acts as our placeholder
+                    left: 'roomSelectorBtn',
                     center: 'title',
                     right: isMobile ? 'prev,next' : ''
                 },
 
-                // 2. The SECRET FIX: Use datesSet to re-inject after every navigation/render
                 datesSet: function() {
                     injectRoomButton();
                 },
 
-                // 3. Consolidated Window Resize (One function only)
                 windowResize: function(arg) {
                     if (window.innerWidth < 768) {
                         calendar.changeView('timeGridDay');
@@ -483,7 +607,6 @@ while ($r = $rooms_res->fetch_assoc()) {
                             right: ''
                         });
                     }
-                    // Small delay to let FullCalendar finish drawing before we inject
                     setTimeout(injectRoomButton, 50);
                 },
 
@@ -510,12 +633,11 @@ while ($r = $rooms_res->fetch_assoc()) {
             calendar.render();
             window.currentCalendar = calendar;
 
-            // Set initial room
             if (roomsList.length > 0) updateTargetRoom(roomsList[0]);
         });
 
         function updateTargetRoom(room) {
-            const cleanRoom = room.trim(); // Add .trim() here
+            const cleanRoom = room.trim();
             const nameDisplay = document.getElementById('activeRoomName');
             const modalDisplay = document.getElementById('modalRoomTarget');
             const hiddenInput = document.getElementById('hiddenRoomInput');

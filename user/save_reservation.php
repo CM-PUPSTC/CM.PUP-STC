@@ -16,6 +16,26 @@ if (!$account_no) {
     exit;
 }
 
+/* ====================================================================
+   NEW: CHCK 3-RESERVATION LIMIT FOR THE USER
+   ==================================================================== */
+// Counts any reservations that are NOT cancelled (keeps pending & accepted active)
+$limit_sql = "SELECT COUNT(*) as total FROM reservations WHERE id_number = ? AND status != 'Cancelled'";
+$limit_stmt = mysqli_prepare($conn, $limit_sql);
+mysqli_stmt_bind_param($limit_stmt, "s", $account_no);
+mysqli_stmt_execute($limit_stmt);
+$limit_result = mysqli_stmt_get_result($limit_stmt);
+$limit_row = mysqli_fetch_assoc($limit_result);
+
+if ($limit_row['total'] >= 3) {
+    echo json_encode([
+        'status' => 'error', 
+        'message' => 'Reservation limit reached! You can only have a maximum of 3 active reservations at a time.'
+    ]);
+    exit;
+}
+/* ==================================================================== */
+
 $dayOfWeek = date("l", strtotime($date));
 
 // 1. Check for Regular Class Conflicts (unless cancelled)

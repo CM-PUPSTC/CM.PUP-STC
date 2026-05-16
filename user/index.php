@@ -101,9 +101,11 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             overflow-x: hidden;
         }
 
-        .navbar-pup {
-            background-color: var(--pup-maroon);
+        .top-navbar {
+            background: var(--pup-maroon);
             color: white;
+            padding: 10px 25px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
         }
 
         .main-content {
@@ -171,25 +173,27 @@ while ($row = mysqli_fetch_assoc($class_result)) {
 
 <body>
 
-    <nav class="navbar navbar-pup py-3 mb-3 sticky-top">
-        <div class="container-fluid px-md-4">
-            <a class="navbar-brand text-white fw-bold d-flex align-items-center" href="#">
-                <img src="../img/PUPLogo.png" alt="Logo" width="30" height="30" class="me-2">
-                <span>PUPSTC CMS</span>
-            </a>
-            <div class="dropdown">
-                <div class="d-flex align-items-center bg-white bg-opacity-10 rounded-pill px-2 py-1 dropdown-toggle" role="button" data-bs-toggle="dropdown">
-                    <span class="small me-2 text-white"><?php echo $section_name; ?></span>
-                    <img src="https://ui-avatars.com/api/?name=<?php echo urlencode($section_name); ?>&background=FFD700&color=800000" class="rounded-circle" width="28">
-                </div>
-                <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2">
-                    <li class="px-3 py-2 text-muted small">ID: <?php echo $account_no; ?></li>
-                    <li>
-                        <hr class="dropdown-divider">
-                    </li>
-                    <li><a class="dropdown-item small text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i>Sign Out</a></li>
-                </ul>
+    <nav class="top-navbar d-flex justify-content-between align-items-center mb-4 sticky-top">
+        <div class="d-flex align-items-center">
+            <img src="../img/PUPLogo.png" alt="Logo" width="55" height="55" class="me-3">
+            <div class="lh-sm">
+                <h4 class="fw-bold m-0">PUP-STC</h4>
+                <small class="opacity-75">Classroom Management System</small>
             </div>
+        </div>
+
+        <div class="dropdown">
+            <div class="d-flex align-items-center bg-white bg-opacity-10 rounded-pill px-2 py-1 dropdown-toggle" role="button" data-bs-toggle="dropdown">
+                <span class="small me-2 text-white"><?php echo $section_name; ?></span>
+                <img src="https://ui-avatars.com/api/?name=<?php echo urlencode($section_name); ?>&background=FFD700&color=800000" class="rounded-circle" width="28">
+            </div>
+            <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2">
+                <li class="px-3 py-2 text-muted small">ID: <?php echo $account_no; ?></li>
+                <li>
+                    <hr class="dropdown-divider">
+                </li>
+                <li><a class="dropdown-item small text-danger" href="../logout.php"><i class="fas fa-sign-out-alt me-2"></i>Sign Out</a></li>
+            </ul>
         </div>
     </nav>
 
@@ -205,6 +209,7 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                             <th>Day/Time</th>
                             <th class="d-none d-md-table-cell">Subject</th>
                             <th>Status</th>
+                            <th>Professor</th>
                         </tr>
                     </thead>
                     <tbody id="masterSchedTableBody"></tbody>
@@ -383,7 +388,7 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             });
 
             if (masterSchedules.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No classes found.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No classes found.</td></tr>';
                 return;
             }
 
@@ -406,13 +411,25 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                 let statusBadge = isCancelled ? '<span class="badge bg-danger small">Cancel</span>' :
                     (isNow ? '<span class="badge bg-success">NOW</span>' : '<span class="badge bg-light text-dark border small">Regular</span>');
 
+                // Clean up empty or unassigned professor records gracefully
+                let profName = (s.professor_name && s.professor_name.trim() !== "") ? s.professor_name : "TBA";
+
+                // NEW UPDATED CODE
                 return `<tr>
-            <td class="ps-4 d-none d-sm-table-cell"><img src="${details.img}" class="classroom-img"></td>
-            <td><div class="fw-bold small">${s.room_name}</div><div class="text-muted" style="font-size:0.7rem">${details.loc}</div></td>
-            <td class="small"><div class="fw-bold">${formatTime(start)} - ${formatTime(end)}</div><div class="text-muted">${s.day_of_week}</div></td>
-            <td class="d-none d-md-table-cell"><span class="badge bg-light text-dark border">${s.subject_code}</span></td>
-            <td>${statusBadge}</td>
-        </tr>`;
+    <td class="ps-4 d-none d-sm-table-cell"><img src="${details.img}" class="classroom-img"></td>
+    <td><div class="fw-bold small">${s.room_name}</div><div class="text-muted" style="font-size:0.7rem">${details.loc}</div></td>
+    <td class="small"><div class="fw-bold">${formatTime(start)} - ${formatTime(end)}</div><div class="text-muted">${s.day_of_week}</div></td>
+    
+    <td class="d-none d-md-table-cell">
+        <div class="fw-bold text-dark mb-1" style="font-size:0.85rem;">${s.subject_code}</div>
+        <div class="text-muted small" style="font-size:0.75rem; max-width: 200px; white-space: normal;">
+            ${s.subject_name ? s.subject_name : 'No Description'}
+        </div>
+    </td>
+    
+    <td>${statusBadge}</td>
+    <td class="small fw-semibold text-secondary"><i class="fas fa-user-tie me-1 text-muted"></i> ${profName}</td>
+</tr>`;
             }).join('');
         }
 
@@ -468,17 +485,99 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                 tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-muted small">No records found.</td></tr>';
                 return;
             }
+
             tbody.innerHTML = myReservations.map(res => {
                 const status = res.status.toLowerCase();
-                let statusHtml = (status === 'accepted') ? `<span class="badge bg-success status-pill">Approved</span>` :
-                    (status === 'pending') ? `<span class="badge bg-info text-dark status-pill">In Queue</span>` :
-                    `<span class="badge bg-secondary status-pill">Cancelled</span>`;
+                let statusHtml = "";
+                let actionButtonsHtml = "";
+
+                // Uniform styling rule to force every single badge and button to look identical in size
+                const fixedSizeStyle = "width: 100px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; padding: 5px 0; text-align: center; border-radius: 4px; letter-spacing: 0.5px;";
+
+                if (status === 'accepted') {
+                    statusHtml = `<span class="badge bg-success status-pill" style="${fixedSizeStyle}">Approved</span>`;
+
+                    // Stacks the Slip and Cancel buttons cleanly down the column line
+                    actionButtonsHtml = `
+                <button class="btn btn-sm btn-primary fw-bold shadow-sm" style="${fixedSizeStyle}" onclick="viewSlip('${res.refNo}')">
+                <i></i> Slip
+                </button>
+                <button class="btn btn-sm btn-danger fw-bold shadow-sm" style="${fixedSizeStyle}" onclick="cancelReservation('${res.refNo}')">
+                <i></i> Cancel
+                </button>
+            `;
+                } else if (status === 'pending') {
+                    statusHtml = `<span class="badge bg-info text-dark status-pill" style="${fixedSizeStyle}">In Queue</span>`;
+
+                    actionButtonsHtml = `
+                <button class="btn btn-sm btn-danger fw-bold shadow-sm" style="${fixedSizeStyle}" onclick="cancelReservation('${res.refNo}')">
+                <i class="fas fa-times me-1"></i> Cancel
+                </button>
+            `;
+                } else {
+                    statusHtml = `<span class="badge bg-secondary status-pill" style="${fixedSizeStyle}">Cancelled</span>`;
+                    actionButtonsHtml = "";
+                }
+
                 return `<tr>
-            <td class="ps-4"><div class="fw-bold">${res.classroom}</div><div class="text-muted small">Ref: #${res.refNo}</div></td>
-            <td class="small">${res.dateTime}</td>
-            <td class="text-center">${statusHtml}</td>
-        </tr>`;
+                <td class="ps-4">
+                <div class="fw-bold text-dark" style="font-size:0.9rem;">${res.classroom}</div>
+                <div class="text-muted small" style="font-size:0.75rem;">Ref: #${res.refNo}</div>
+                </td>
+                <td class="small text-secondary fw-medium">${res.dateTime}</td>
+                <td class="text-center">
+                <div class="d-flex flex-column align-items-center justify-content-center gap-1">
+                    ${statusHtml}
+                    ${actionButtonsHtml}
+                </div>
+                </td>
+                </tr>`;
             }).join('');
+        }
+
+        // Add this function right at the bottom area of your scripts
+        function viewSlip(refNo) {
+            // This targets your existing file and passes the unique reference ID through the URL parameter
+            window.open(`receipt.php?id=${refNo}`, '_blank');
+        }
+
+        function cancelReservation(refNo) {
+            if (confirm(`Are you sure you want to cancel reservation request #${refNo}?`)) {
+                const formData = new FormData();
+                formData.append('refNo', refNo);
+
+                fetch('cancel_reservation.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        showNotify(data.message, data.status);
+
+                        if (data.status === 'success') {
+                            // 1. Smoothly update the local data array status
+                            const reservation = myReservations.find(res => res.refNo === refNo);
+                            if (reservation) {
+                                reservation.status = 'cancelled';
+                            }
+
+                            // 2. FORCE REMOVE THE STUCK FADE OVERLAY/BACKDROP
+                            // This clears Bootstrap's modal backdrop if it gets stuck
+                            const backdrops = document.querySelectorAll('.modal-backdrop, .modal-shadow');
+                            backdrops.forEach(backdrop => backdrop.remove());
+
+                            // If your overall wrapper body has a class trapping the dark light effect, reset it:
+                            document.body.classList.remove('modal-open');
+                            document.body.style.overflow = ''; // Restores scrolling if frozen
+
+                            // 3. Re-render only the table rows instantly without a page refresh!
+                            renderStatusTable();
+                        }
+                    })
+                    .catch(err => {
+                        showNotify("Error processing cancellation request.", "error");
+                    });
+            }
         }
 
         function updateAllTables() {
@@ -510,7 +609,8 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                 html += `<div class="occupied-slot-item"><strong>${formatTime(slot.start)} - ${formatTime(slot.end)}</strong> (Reserved)</div>`;
             });
             preScheduled.forEach(s => {
-                html += `<div class="occupied-slot-item" style="background:#eee; color:#666; border-color:#999"><strong>${formatTime(s.start_time)} - ${formatTime(s.end_time)}</strong> (Class: ${s.subject_code})</div>`;
+                let profName = (s.professor_name && s.professor_name.trim() !== "") ? s.professor_name : "TBA";
+                html += `<div class="occupied-slot-item" style="background:#eee; color:#666; border-color:#999"><strong>${formatTime(s.start_time)} - ${formatTime(s.end_time)}</strong> (Class: ${s.subject_code} - ${profName})</div>`;
             });
             container.innerHTML = html || "<div class='small text-muted p-2'>Available all day.</div>";
         }
