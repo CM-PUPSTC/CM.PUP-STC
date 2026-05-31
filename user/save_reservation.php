@@ -1,81 +1,65 @@
 <?php
 session_start();
-/** @var mysqli $conn */
-include('../connect.php');
 header('Content-Type: application/json');
 
-$account_no = $_SESSION['account_number'] ?? ''; 
-$room    = $_POST['room']    ?? '';
-$date    = $_POST['date']    ?? '';
-$purpose = $_POST['purpose'] ?? '';
-$start   = !empty($_POST['start']) ? date("H:i:s", strtotime($_POST['start'])) : '';
-$end     = !empty($_POST['end'])   ? date("H:i:s", strtotime($_POST['end'])) : '';
-
-if (!$account_no) {
-    echo json_encode(['status' => 'error', 'message' => 'Session expired.']);
-    exit;
+if (!isset($_SESSION['account_id'])) {
+    echo json_encode(['status' => 'error', 'message' => 'Unauthorized access.']);
+    exit();
 }
 
-/* ====================================================================
-   NEW: CHCK 3-RESERVATION LIMIT FOR THE USER
-   ==================================================================== */
-// Counts any reservations that are NOT cancelled (keeps pending & accepted active)
-$limit_sql = "SELECT COUNT(*) as total FROM reservations WHERE id_number = ? AND status != 'Cancelled'";
-$limit_stmt = mysqli_prepare($conn, $limit_sql);
-mysqli_stmt_bind_param($limit_stmt, "s", $account_no);
-mysqli_stmt_execute($limit_stmt);
-$limit_result = mysqli_stmt_get_result($limit_stmt);
-$limit_row = mysqli_fetch_assoc($limit_result);
+/** @var mysqli $conn */
+include('../connect.php');
 
-if ($limit_row['total'] >= 3) {
+$account_no = $_SESSION['account_number'];
+
+// 1. Grab incoming POST data sent from your index.php form
+$room    = mysqli_real_escape_string($conn, $_POST['room']);
+$date    = mysqli_real_escape_string($conn, $_POST['date']);
+$start   = mysqli_real_escape_string($conn, $_POST['start']);
+$end     = mysqli_real_escape_string($conn, $_POST['end']);
+$purpose = mysqli_real_escape_string($conn, $_POST['purpose']);
+
+$start_time = date("H:i:s", strtotime($start));
+$end_time   = date("H:i:s", strtotime($end));
+$day_name   = date('l', strtotime($date));
+
+// 2. Conflict Validation Check (Optional but recommended):
+// Make sure it doesn't overlap with a regular class or an already approved booking
+$check_accepted_query = "
+    SELECT id FROM reservations 
+    WHERE room_name = '$room' 
+      AND reservation_date = '$date' 
+      AND status = 'Accepted'
+      AND ('$start_time' < end_time AND '$end_time' > start_time)
+    LIMIT 1
+";
+$accepted_conflict = mysqli_query($conn, $check_accepted_query);
+
+if (mysqli_num_rows($accepted_conflict) > 0) {
     echo json_encode([
         'status' => 'error', 
-        'message' => 'Reservation limit reached! You can only have a maximum of 3 active reservations at a time.'
+        'message' => 'This slot is unavailable because it has already been approved for another request.'
     ]);
-    exit;
-}
-/* ==================================================================== */
-
-$dayOfWeek = date("l", strtotime($date));
-
-// 1. Check for Regular Class Conflicts (unless cancelled)
-$sched_sql = "SELECT * FROM class_schedules 
-              WHERE room_name = ? AND day_of_week = ? 
-              AND (? < end_time AND ? > start_time)
-              AND id NOT IN (SELECT schedule_id FROM cancelled_classes WHERE cancelled_date = ?)";
-
-$sched_stmt = mysqli_prepare($conn, $sched_sql);
-mysqli_stmt_bind_param($sched_stmt, "sssss", $room, $dayOfWeek, $start, $end, $date);
-mysqli_stmt_execute($sched_stmt);
-if (mysqli_num_rows(mysqli_stmt_get_result($sched_stmt)) > 0) {
-    echo json_encode(['status' => 'error', 'message' => 'Slot occupied by a regular class schedule.']);
-    exit;
+    exit();
 }
 
-// 2. Check for Accepted Reservations
-$check_sql = "SELECT * FROM reservations 
-              WHERE room_name = ? AND reservation_date = ? 
-              AND status = 'Accepted' AND (? < end_time AND ? > start_time)";
+// 3. CRITICAL INTEGRATION FIX:
+// Explicitly pass 'Pending' as a string into your status field column.
+// This guarantees that it hits the admin approval queue first instead of auto-accepting.
+$insert_query = "
+    INSERT INTO reservations (id_number, room_name, reservation_date, start_time, end_time, purpose, status, created_at) 
+    VALUES ('$account_no', '$room', '$date', '$start_time', '$end_time', '$purpose', 'Pending', NOW())
+";
 
-$check_stmt = mysqli_prepare($conn, $check_sql);
-mysqli_stmt_bind_param($check_stmt, "ssss", $room, $date, $start, $end);
-mysqli_stmt_execute($check_stmt);
-$res_result = mysqli_stmt_get_result($check_stmt);
-
-// 3. Finalize Status (Accept if clear, Pending if occupied by another reservation)
-$final_status = (mysqli_num_rows($res_result) > 0) ? 'Pending' : 'Accepted';
-
-$sql = "INSERT INTO reservations (id_number, room_name, reservation_date, start_time, end_time, purpose, status) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)";
-$stmt = mysqli_prepare($conn, $sql);
-mysqli_stmt_bind_param($stmt, "sssssss", $account_no, $room, $date, $start, $end, $purpose, $final_status);
-
-if (mysqli_stmt_execute($stmt)) {
+if (mysqli_query($conn, $insert_query)) {
     echo json_encode([
-        'status' => 'success',
-        'message' => ($final_status === 'Accepted') ? 'Reservation Confirmed!' : 'Request is now Pending.'
+        'status' => 'success', 
+        'message' => 'Request submitted successfully! Your booking is now in the queue waiting for evaluation.'
     ]);
 } else {
-    echo json_encode(['status' => 'error', 'message' => 'Database error.']);
+    echo json_encode([
+        'status' => 'error', 
+        'message' => 'Database error: Unable to process queue entry.'
+    ]);
 }
 ?>

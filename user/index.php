@@ -20,12 +20,20 @@ $user_result = mysqli_query($conn, "SELECT * FROM users WHERE id = '$clean_id' L
 $user_data = mysqli_fetch_assoc($user_result);
 $section_name = $user_data['section_name'] ?? "Guest User";
 
-// 1. Fetch the User's Weekly Schedule
-$master_sched_query = "SELECT * FROM class_schedules WHERE section_name = '$section_name' ORDER BY FIELD(day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'), start_time ASC";
-$master_result = mysqli_query($conn, $master_sched_query);
-$master_schedules = [];
-while ($row = mysqli_fetch_assoc($master_result)) {
-    $master_schedules[] = $row;
+// 1. Fetch the User's PERSONAL Weekly Schedule (For the top schedule panel view)
+$my_section_query = "SELECT * FROM class_schedules WHERE section_name = '$section_name' ORDER BY FIELD(day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'), start_time ASC";
+$my_section_result = mysqli_query($conn, $my_section_query);
+$my_personal_schedules = [];
+while ($row = mysqli_fetch_assoc($my_section_result)) {
+    $my_personal_schedules[] = $row;
+}
+
+// 1-B. NEW: Fetch ALL regular classes across campus so the reservation system can see conflicts!
+$all_sched_query = "SELECT * FROM class_schedules ORDER BY start_time ASC";
+$all_sched_result = mysqli_query($conn, $all_sched_query);
+$global_master_schedules = [];
+while ($row = mysqli_fetch_assoc($all_sched_result)) {
+    $global_master_schedules[] = $row;
 }
 
 // 2. Fetch ALL Cancelled Classes to pass to JavaScript
@@ -88,6 +96,7 @@ while ($row = mysqli_fetch_assoc($class_result)) {
     <title>PUPSTC CMS</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="icon" type="image/png" href="../img/PUPLogo.png">
     <style>
         :root {
             --pup-maroon: #800000;
@@ -199,6 +208,26 @@ while ($row = mysqli_fetch_assoc($class_result)) {
 
     <div class="container-fluid main-content">
         <h4 class="fw-bold text-dark mb-3"><i class="fas fa-calendar-alt me-2 text-warning"></i>Class Schedule</h4>
+        <div class="search-container">
+            <div class="row g-3">
+                <div class="col-12 col-md-4">
+                    <span class="filter-label">Reservation Date</span>
+                    <input type="date" class="form-control form-control-sm" id="searchDate" value="<?php echo date('Y-m-d'); ?>" onchange="updateAllTables()">
+                </div>
+                <div class="col-12 col-md-8">
+                    <span class="filter-label">Search Classroom</span>
+                    <div class="input-group input-group-sm">
+                        <select class="form-select" id="filterType" onchange="handleFilter()" style="max-width: 100px;">
+                            <option value="All Types">All</option>
+                            <option value="Laboratory">Lab</option>
+                            <option value="Classroom">Room</option>
+                        </select>
+                        <input type="text" id="filterSearch" class="form-control" placeholder="Room name..." onkeyup="handleFilter()">
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="schedule-container p-0 overflow-hidden">
             <div class="table-responsive">
                 <table class="table align-middle mb-0">
@@ -220,26 +249,6 @@ while ($row = mysqli_fetch_assoc($class_result)) {
         <div class="mb-3 mt-5">
             <h3 class="fw-bold text-dark mb-1">Reservations</h3>
             <p class="text-muted small">Book available slots for make-up classes.</p>
-        </div>
-
-        <div class="search-container">
-            <div class="row g-3">
-                <div class="col-12 col-md-4">
-                    <span class="filter-label">Reservation Date</span>
-                    <input type="date" class="form-control form-control-sm" id="searchDate" value="<?php echo date('Y-m-d'); ?>" onchange="updateAllTables()">
-                </div>
-                <div class="col-12 col-md-8">
-                    <span class="filter-label">Search Classroom</span>
-                    <div class="input-group input-group-sm">
-                        <select class="form-select" id="filterType" onchange="handleFilter()" style="max-width: 100px;">
-                            <option value="All Types">All</option>
-                            <option value="Laboratory">Lab</option>
-                            <option value="Classroom">Room</option>
-                        </select>
-                        <input type="text" id="filterSearch" class="form-control" placeholder="Room name..." onkeyup="handleFilter()">
-                    </div>
-                </div>
-            </div>
         </div>
 
         <div class="classroom-card p-0 overflow-hidden">
@@ -265,9 +274,7 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                     <thead>
                         <tr class="align-middle">
                             <th class="ps-4 py-3" style="width: 40%;">CLASSROOM</th>
-
                             <th class="py-3" style="width: 35%;">DATE & TIME</th>
-
                             <th class="text-center py-3" style="width: 25%;">VERIFICATION</th>
                         </tr>
                     </thead>
@@ -291,7 +298,7 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                         <small class="text-muted" id="modalDateDisplay"></small>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label small fw-bold text-danger">Occupied Slots</label>
+                        <label class="form-label small fw-bold text-danger">Occupied Slots (Regular Classes & Bookings)</label>
                         <div id="occupiedListContainer" style="max-height: 150px; overflow-y: auto;"></div>
                     </div>
                     <div class="row g-2 mb-3">
@@ -317,32 +324,35 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                     <button type="button" class="btn btn-dark px-4 fw-bold" onclick="submitReservation()">Submit Request</button>
                 </div>
-                <div class="modal fade" id="statusModal" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog modal-sm modal-dialog-centered">
-                        <div class="modal-content border-0 shadow-lg text-center p-4">
-                            <div id="statusIconContainer" class="mb-3">
-                                <i id="statusIcon" class="fas fa-exclamation-triangle fa-3x"></i>
-                            </div>
-                            <h5 id="statusTitle" class="fw-bold mb-2">Notice</h5>
-                            <p id="statusMessage" class="text-muted small mb-3"></p>
-                            <button type="button" class="btn btn-dark btn-sm w-100" data-bs-dismiss="modal">OK</button>
-                        </div>
-                    </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="statusModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-sm modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg text-center p-4">
+                <div id="statusIconContainer" class="mb-3">
+                    <i id="statusIcon" class="fas fa-exclamation-triangle fa-3x"></i>
                 </div>
+                <h5 id="statusTitle" class="fw-bold mb-2">Notice</h5>
+                <p id="statusMessage" class="text-muted small mb-3"></p>
+                <button type="button" class="btn btn-dark btn-sm w-100" data-bs-dismiss="modal">OK</button>
             </div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Data passed from PHP
+        // Data configurations safely structured from PHP variables
         const classrooms = <?php echo json_encode($classroom_list); ?>;
         const myReservations = <?php echo json_encode($history); ?>;
         const occupiedSlots = <?php echo json_encode($db_occupied); ?>;
-        const masterSchedules = <?php echo json_encode($master_schedules); ?>;
         const cancellations = <?php echo json_encode($all_cancellations); ?>;
 
-        // --- NEW: THE MISSING NOTIFICATION FUNCTION ---
+        // FIXED DATA SEPARATION:
+        const personalSchedules = <?php echo json_encode($my_personal_schedules); ?>; // Student Section Only
+        const masterSchedules = <?php echo json_encode($global_master_schedules); ?>; // Global Semester List
+
         function showNotify(message, type = 'warning') {
             const titleEl = document.getElementById('statusTitle');
             const msgEl = document.getElementById('statusMessage');
@@ -378,19 +388,63 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             return `${hours}:${minutes} ${modifier}`;
         };
 
+        // Renders Top panel: Strict view matching ONLY this student's section classes
         function renderMasterSchedule() {
             const selectedDate = document.getElementById('searchDate').value;
             const tbody = document.getElementById('masterSchedTableBody');
+
+            // Grab the current filter inputs from your layout search-container
+            const search = document.getElementById('filterSearch').value.toLowerCase().trim();
+            const type = document.getElementById('filterType').value.toLowerCase();
+
             const roomDetails = {};
             classrooms.forEach(c => {
                 roomDetails[c.name] = {
                     img: c.img,
-                    loc: c.loc
+                    loc: c.loc,
+                    cat: c.cat ? c.cat.toLowerCase() : 'classroom' // fallback to lowercase category
                 };
             });
 
-            if (masterSchedules.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No classes found.</td></tr>';
+            if (personalSchedules.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No classes found for your section.</td></tr>';
+                return;
+            }
+
+            // ====================================================================
+            // NEW: FILTER THE PERSONAL SCHEDULES ARRAY DYNAMICALLY BEFORE RENDERING
+            // ====================================================================
+            const filteredPersonalSchedules = personalSchedules.filter(s => {
+                const roomName = s.room_name.toLowerCase();
+
+                // 1. Check if room name matches text input search
+                const matchesSearch = roomName.includes(search);
+
+                // 2. Get category from roomDetails dictionary if it exists
+                const roomCategory = roomDetails[s.room_name] ? roomDetails[s.room_name].cat : '';
+
+                // 3. Match dropdown type safely
+                let matchesType = false;
+                if (type === "all types" || type === "all" || type === "") {
+                    matchesType = true;
+                } else if (type === "laboratory") {
+                    // Matches if category is lab OR if the room name contains the word 'lab'
+                    matchesType = roomCategory.includes("lab") || roomName.includes("lab");
+                } else if (type === "classroom") {
+                    // Exclude labs if filtering strictly for regular lecture classrooms
+                    if (roomName.includes("lab")) {
+                        matchesType = false;
+                    } else {
+                        matchesType = roomCategory.includes("room") || roomCategory.includes("classroom");
+                    }
+                }
+
+                return matchesSearch && matchesType;
+            });
+
+            // If everything gets filtered out, show a clean "no results" row
+            if (filteredPersonalSchedules.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted small">No class schedules match your filter criteria.</td></tr>';
                 return;
             }
 
@@ -399,7 +453,8 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             const todayName = days[now.getDay()];
             const currentTime = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
 
-            tbody.innerHTML = masterSchedules.map(s => {
+            // Render using our new filtered array instead of the raw personalSchedules
+            tbody.innerHTML = filteredPersonalSchedules.map(s => {
                 const isCancelled = cancellations.some(c => c.schedule_id == s.id && c.cancelled_date === selectedDate);
                 const isToday = (s.day_of_week === todayName && selectedDate === now.toISOString().split('T')[0]);
                 const start = s.start_time.substring(0, 5);
@@ -411,30 +466,25 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                 };
 
                 let statusBadge = isCancelled ? '<span class="badge bg-danger small">Cancel</span>' :
-                    (isNow ? '<span class="badge bg-success">NOW</span>' : '<span class="badge bg-light text-dark border small">Regular</span>');
+                    (isNow ? '<span class="badge bg-success">ON GOING</span>' : '<span class="badge bg-light text-dark border small">Regular</span>');
 
-                // Clean up empty or unassigned professor records gracefully
                 let profName = (s.professor_name && s.professor_name.trim() !== "") ? s.professor_name : "TBA";
 
-                // NEW UPDATED CODE
                 return `<tr>
-    <td class="ps-4 d-none d-sm-table-cell"><img src="${details.img}" class="classroom-img"></td>
-    <td><div class="fw-bold small">${s.room_name}</div><div class="text-muted" style="font-size:0.7rem">${details.loc}</div></td>
-    <td class="small"><div class="fw-bold">${formatTime(start)} - ${formatTime(end)}</div><div class="text-muted">${s.day_of_week}</div></td>
-    
-    <td class="d-none d-md-table-cell">
-        <div class="fw-bold text-dark mb-1" style="font-size:0.85rem;">${s.subject_code}</div>
-        <div class="text-muted small" style="font-size:0.75rem; max-width: 200px; white-space: normal;">
-            ${s.subject_name ? s.subject_name : 'No Description'}
-        </div>
-    </td>
-    
-    <td>${statusBadge}</td>
-    <td class="small fw-semibold text-secondary"><i class="fas fa-user-tie me-1 text-muted"></i> ${profName}</td>
-</tr>`;
+            <td class="ps-4 d-none d-sm-table-cell"><img src="${details.img}" class="classroom-img"></td>
+            <td><div class="fw-bold small">${s.room_name}</div><div class="text-muted" style="font-size:0.7rem">${details.loc}</div></td>
+            <td class="small"><div class="fw-bold">${formatTime(start)} - ${formatTime(end)}</div><div class="text-muted">${s.day_of_week}</div></td>
+            <td class="d-none d-md-table-cell">
+                <div class="fw-bold text-dark mb-1" style="font-size:0.85rem;">${s.subject_code}</div>
+                <div class="text-muted small" style="font-size:0.75rem; max-width: 200px; white-space: normal;">${s.subject_name ? s.subject_name : 'No Description'}</div>
+            </td>
+            <td>${statusBadge}</td>
+            <td class="small fw-semibold text-secondary"><i class="fas fa-user-tie me-1 text-muted"></i> ${profName}</td>
+        </tr>`;
             }).join('');
         }
 
+        // Classroom Row Badging: Cross-checks room layout against ALL semester schedules
         function renderTable(dataToDisplay) {
             var list = dataToDisplay || classrooms;
             var htmlContent = "";
@@ -445,37 +495,27 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             list.forEach(c => {
                 const dateKey = selectedDate + "_" + c.name;
                 let hasManualBooking = (occupiedSlots[dateKey] && occupiedSlots[dateKey].length > 0);
+
+                // Evaluates against the global master list so ANY section's class flags the badge red
                 let hasRegularClass = masterSchedules.some(s =>
                     s.room_name === c.name && s.day_of_week === dayName &&
                     !cancellations.some(can => can.schedule_id == s.id && can.cancelled_date === selectedDate)
                 );
 
-                let badge = hasRegularClass ? '<span class="badge bg-light text-secondary border small">Regular</span>' :
-                    (hasManualBooking ? '<span class="badge bg-warning bg-opacity-10 text-warning border small">Schedule</span>' :
+                let badge = hasRegularClass ? '<span class="badge bg-danger bg-opacity-10 text-danger border small">Regular Class</span>' :
+                    (hasManualBooking ? '<span class="badge bg-warning bg-opacity-10 text-warning border small">Reserved Slot</span>' :
                         '<span class="badge bg-success bg-opacity-10 text-success border small">Available</span>');
 
                 htmlContent += `<tr>
-                <td class='d-none d-md-table-cell ps-4 align-middle'>
-                <img src='${c.img}' class='classroom-img'>
-                </td>
-
-                <td class="align-middle">
-                <div class='fw-bold small'>${c.name}</div>
-                <div style='font-size: 0.7rem' class='text-muted'>${c.loc}</div>
-                </td>
-
-                <td class="align-middle">
-                ${badge}
-                </td>
-
-                <td class='text-center align-middle'>
-                <button class='btn btn-sm btn-schedule px-3' 
-                onclick="prepareModal('${c.name}')" 
-                data-bs-toggle='modal' 
-                data-bs-target='#confirmModal'>
-                Schedule
-                </button>
-                </td>
+                    <td class='d-none d-md-table-cell ps-4 align-middle'><img src='${c.img}' class='classroom-img'></td>
+                    <td class="align-middle">
+                        <div class='fw-bold small'>${c.name}</div>
+                        <div style='font-size: 0.7rem' class='text-muted'>${c.loc}</div>
+                    </td>
+                    <td class="align-middle">${badge}</td>
+                    <td class='text-center align-middle'>
+                        <button class='btn btn-sm btn-schedule px-3' onclick="prepareModal('${c.name}')" data-bs-toggle='modal' data-bs-target='#confirmModal'>Schedule</button>
+                    </td>
                 </tr>`;
             });
             document.getElementById('roomTableBody').innerHTML = htmlContent;
@@ -492,108 +532,39 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                 const status = res.status.toLowerCase();
                 let statusHtml = "";
                 let actionButtonsHtml = "";
-
-                // Uniform styling rule to force every single badge and button to look identical in size
                 const fixedSizeStyle = "width: 100px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; padding: 5px 0; text-align: center; border-radius: 4px; letter-spacing: 0.5px;";
 
                 if (status === 'accepted') {
                     statusHtml = `<span class="badge bg-success status-pill" style="${fixedSizeStyle}">Approved</span>`;
-
-                    // Stacks the Slip and Cancel buttons cleanly down the column line
                     actionButtonsHtml = `
-                <button class="btn btn-sm btn-primary fw-bold shadow-sm" style="${fixedSizeStyle}" onclick="viewSlip('${res.refNo}')">
-                <i></i> Slip
-                </button>
-                <button class="btn btn-sm btn-danger fw-bold shadow-sm" style="${fixedSizeStyle}" onclick="cancelReservation('${res.refNo}')">
-                <i></i> Cancel
-                </button>
-            `;
+                        <button class="btn btn-sm btn-primary fw-bold shadow-sm mt-1" style="${fixedSizeStyle}" onclick="viewSlip('${res.refNo}')">Slip</button>
+                        <button class="btn btn-sm btn-danger fw-bold shadow-sm mt-1" style="${fixedSizeStyle}" onclick="cancelReservation('${res.refNo}')">Cancel</button>`;
                 } else if (status === 'pending') {
                     statusHtml = `<span class="badge bg-info text-dark status-pill" style="${fixedSizeStyle}">In Queue</span>`;
-
                     actionButtonsHtml = `
-                <button class="btn btn-sm btn-danger fw-bold shadow-sm" style="${fixedSizeStyle}" onclick="cancelReservation('${res.refNo}')">
-                <i class="fas fa-times me-1"></i> Cancel
-                </button>
-            `;
+                        <button class="btn btn-sm btn-danger fw-bold shadow-sm mt-1" style="${fixedSizeStyle}" onclick="cancelReservation('${res.refNo}')">Cancel</button>`;
                 } else {
                     statusHtml = `<span class="badge bg-secondary status-pill" style="${fixedSizeStyle}">Cancelled</span>`;
                     actionButtonsHtml = "";
                 }
 
                 return `<tr>
-                <td class="ps-4">
-                <div class="fw-bold text-dark" style="font-size:0.9rem;">${res.classroom}</div>
-                <div class="text-muted small" style="font-size:0.75rem;">Ref: #${res.refNo}</div>
-                </td>
-                <td class="small text-secondary fw-medium">${res.dateTime}</td>
-                <td class="text-center">
-                <div class="d-flex flex-column align-items-center justify-content-center gap-1">
-                    ${statusHtml}
-                    ${actionButtonsHtml}
-                </div>
-                </td>
+                    <td class="ps-4">
+                        <div class="fw-bold text-dark" style="font-size:0.9rem;">${res.classroom}</div>
+                        <div class="text-muted small" style="font-size:0.75rem;">Ref: #No_${res.refNo}</div>
+                    </td>
+                    <td class="small text-secondary fw-medium">${res.dateTime}</td>
+                    <td class="text-center">
+                        <div class="d-flex flex-column align-items-center justify-content-center">
+                            ${statusHtml}
+                            ${actionButtonsHtml}
+                        </div>
+                    </td>
                 </tr>`;
             }).join('');
         }
 
-        // Add this function right at the bottom area of your scripts
-        function viewSlip(refNo) {
-            // This targets your existing file and passes the unique reference ID through the URL parameter
-            window.open(`receipt.php?id=${refNo}`, '_blank');
-        }
-
-        function cancelReservation(refNo) {
-            if (confirm(`Are you sure you want to cancel reservation request #${refNo}?`)) {
-                const formData = new FormData();
-                formData.append('refNo', refNo);
-
-                fetch('cancel_reservation.php', {
-                        method: 'POST',
-                        body: formData
-                    })
-                    .then(res => res.json())
-                    .then(data => {
-                        showNotify(data.message, data.status);
-
-                        if (data.status === 'success') {
-                            // 1. Smoothly update the local data array status
-                            const reservation = myReservations.find(res => res.refNo === refNo);
-                            if (reservation) {
-                                reservation.status = 'cancelled';
-                            }
-
-                            // 2. FORCE REMOVE THE STUCK FADE OVERLAY/BACKDROP
-                            // This clears Bootstrap's modal backdrop if it gets stuck
-                            const backdrops = document.querySelectorAll('.modal-backdrop, .modal-shadow');
-                            backdrops.forEach(backdrop => backdrop.remove());
-
-                            // If your overall wrapper body has a class trapping the dark light effect, reset it:
-                            document.body.classList.remove('modal-open');
-                            document.body.style.overflow = ''; // Restores scrolling if frozen
-
-                            // 3. Re-render only the table rows instantly without a page refresh!
-                            renderStatusTable();
-                        }
-                    })
-                    .catch(err => {
-                        showNotify("Error processing cancellation request.", "error");
-                    });
-            }
-        }
-
-        function updateAllTables() {
-            renderMasterSchedule();
-            renderTable();
-        }
-
-        function handleFilter() {
-            const search = document.getElementById('filterSearch').value.toLowerCase();
-            const type = document.getElementById('filterType').value;
-            const filtered = classrooms.filter(c => c.name.toLowerCase().includes(search) && (type === "All Types" || c.cat === type));
-            renderTable(filtered);
-        }
-
+        // Modal Preparation Module: Displays all classes running inside this room on this day name
         function prepareModal(roomName) {
             document.getElementById('selectedClassroom').innerText = roomName;
             const dateVal = document.getElementById('searchDate').value;
@@ -604,16 +575,25 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             const dayName = days[new Date(dateVal).getDay()];
 
             const manualBookings = occupiedSlots[dateKey] || [];
-            const preScheduled = masterSchedules.filter(s => s.room_name === roomName && s.day_of_week === dayName && !cancellations.some(can => can.schedule_id == s.id && can.cancelled_date === dateVal));
+
+            // CRITICAL FIX: Pulls from masterSchedules (Global Array) so ALL classes on this room print cleanly inside the checklist
+            const preScheduled = masterSchedules.filter(s =>
+                s.room_name === roomName &&
+                s.day_of_week === dayName &&
+                !cancellations.some(can => can.schedule_id == s.id && can.cancelled_date === dateVal)
+            );
 
             let html = "";
             manualBookings.forEach(slot => {
-                html += `<div class="occupied-slot-item"><strong>${formatTime(slot.start)} - ${formatTime(slot.end)}</strong> (Reserved)</div>`;
+                html += `<div class="occupied-slot-item"><strong>${formatTime(slot.start)} - ${formatTime(slot.end)}</strong> (Reserved Slot)</div>`;
             });
+
             preScheduled.forEach(s => {
                 let profName = (s.professor_name && s.professor_name.trim() !== "") ? s.professor_name : "TBA";
-                html += `<div class="occupied-slot-item" style="background:#eee; color:#666; border-color:#999"><strong>${formatTime(s.start_time)} - ${formatTime(s.end_time)}</strong> (Class: ${s.subject_code} - ${profName})</div>`;
+                let sectionLabel = s.section_name ? ` [${s.section_name}]` : "";
+                html += `<div class="occupied-slot-item" style="background:#fff1f2; color:#be123c; border-color:#f43f5e"><strong>${formatTime(s.start_time.substring(0,5))} - ${formatTime(s.end_time.substring(0,5))}</strong> (Class: ${s.subject_code}${sectionLabel} - ${profName})</div>`;
             });
+
             container.innerHTML = html || "<div class='small text-muted p-2'>Available all day.</div>";
         }
 
@@ -645,6 +625,7 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
             const dayName = days[new Date(date).getDay()];
 
+            // CRITICAL FIX: Evaluates input boundaries against global parameters to prevent overlapping conflicts
             const conflict = masterSchedules.find(s => {
                 if (s.room_name !== room || s.day_of_week !== dayName) return false;
                 const isCancelled = cancellations.some(c => c.schedule_id == s.id && c.cancelled_date === date);
@@ -653,7 +634,7 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             });
 
             if (conflict) {
-                showNotify(`Conflict! This room has a regular class (${conflict.subject_code}) during that time.`, "error");
+                showNotify(`Conflict! This room has a regular semester class (${conflict.subject_code} - ${conflict.section_name || 'Class'}) during that period.`, "error");
                 return;
             }
 
@@ -677,6 +658,88 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                 });
         }
 
+        function viewSlip(refNo) {
+            window.open(`receipt.php?id=${refNo}`, '_blank');
+        }
+
+        function cancelReservation(refNo) {
+            if (confirm(`Are you sure you want to cancel reservation request #${refNo}?`)) {
+                const formData = new FormData();
+                formData.append('refNo', refNo);
+
+                fetch('cancel_reservation.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        showNotify(data.message, data.status);
+                        if (data.status === 'success') {
+                            const reservation = myReservations.find(res => res.refNo === refNo);
+                            if (reservation) reservation.status = 'cancelled';
+                            const backdrops = document.querySelectorAll('.modal-backdrop, .modal-shadow');
+                            backdrops.forEach(backdrop => backdrop.remove());
+                            document.body.classList.remove('modal-open');
+                            document.body.style.overflow = '';
+                            renderStatusTable();
+                        }
+                    })
+                    .catch(err => {
+                        showNotify("Error processing cancellation request.", "error");
+                    });
+            }
+        }
+
+        function updateAllTables() {
+            renderMasterSchedule();
+            renderTable();
+        }
+
+        function handleFilter() {
+            // 1. Grab values from your existing search inputs
+            const search = document.getElementById('filterSearch').value.toLowerCase().trim();
+            const type = document.getElementById('filterType').value.toLowerCase();
+
+            // ==========================================
+            // FILTER 1: THE RESERVATIONS (ROOMS) TABLE
+            // ==========================================
+            const filteredClassrooms = classrooms.filter(c => {
+                const roomName = c.name.toLowerCase();
+                const roomCategory = c.cat.toLowerCase();
+
+                const matchesSearch = roomName.includes(search);
+
+                let matchesType = false;
+                // Adjusted to match your exact HTML select option values ("all types" or "all")
+                if (type === "all types" || type === "all") {
+                    matchesType = true;
+                } else if (type === "laboratory") {
+                    // Fixes database discrepancy fallback (checks if type is 'lab' or name contains 'lab')
+                    matchesType = roomCategory.includes("lab") || roomName.includes("lab");
+                } else if (type === "classroom") {
+                    if (roomName.includes("lab")) {
+                        matchesType = false;
+                    } else {
+                        matchesType = roomCategory.includes("room") || roomCategory.includes("classroom");
+                    }
+                }
+
+                return matchesSearch && matchesType;
+            });
+
+            // ==========================================
+            // RENDER BOTH TABLES INTERFACES WITH RESULTS
+            // ==========================================
+
+            // 1. Re-renders your room card listings for the Reservations section
+            renderTable(filteredClassrooms);
+
+            // 2. Triggers your master schedule layout function
+            // Since your renderMasterSchedule function reads 'filterSearch' and 'filterType' 
+            // internally on its own, you just need to call it directly like this!
+            renderMasterSchedule();
+        }
+        // Initialize display executions
         updateAllTables();
         renderStatusTable();
     </script>

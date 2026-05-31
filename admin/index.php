@@ -9,10 +9,18 @@ include('../connect.php');
 
 // --- DATABASE HANDLERS ---
 
-// Add New Room
+// Add New Room (FIXED: Handles dynamic inputs and default image assignment)
 if (isset($_POST['add_room'])) {
-    $new_room = mysqli_real_escape_string($conn, $_POST['room_name']);
-    $conn->query("INSERT IGNORE INTO classrooms (room_name, location) VALUES ('$new_room', 'Main Building')");
+    $new_room   = mysqli_real_escape_string($conn, $_POST['room_name']);
+    $location   = mysqli_real_escape_string($conn, $_POST['location']);
+    $room_type  = mysqli_real_escape_string($conn, $_POST['room_type']);
+    
+    // Automatically fall back to PUPLogo.png so student dashboard images never break
+    $default_img = "PUPLogo.png"; 
+
+    $conn->query("INSERT IGNORE INTO classrooms (room_name, location, room_type, image_url, max_capacity) 
+                  VALUES ('$new_room', '$location', '$room_type', '$default_img', 40)");
+                  
     header("Location: index.php?msg=RoomAdded");
     exit();
 }
@@ -21,10 +29,9 @@ if (isset($_POST['add_room'])) {
 if (isset($_POST['add_prof'])) {
     $new_prof = mysqli_real_escape_string($conn, $_POST['prof_name']);
     $department = mysqli_real_escape_string($conn, $_POST['department']);
-    
-    // CHANGED: Changed '123456' to 'prof123' so it automatically hashes 'prof123' instead
+
+    // Automatically hashes 'prof123'
     $temp_pass = password_hash('prof123', PASSWORD_DEFAULT);
-    
     $prof_id = "PROF-" . date('Y') . "-" . rand(1000, 9999);
 
     // Saving department inside the section_name column
@@ -34,18 +41,117 @@ if (isset($_POST['add_prof'])) {
     exit();
 }
 
-// --- DATA FETCHING ---
-// Updated: Added 'Reservation' as subject_name and cs.subject_name to pull your new column row data cleanly!
+// Administrative Cancellation Handler (Schedules & Reservations)
+if (isset($_POST['admin_cancel_action'])) {
+    $action_type = mysqli_real_escape_string($conn, $_POST['action_type']);
+    $target_id = mysqli_real_escape_string($conn, $_POST['target_id']);
+
+    if ($action_type === 'Reservation') {
+        // Rejects the accepted booking and frees the room
+        $conn->query("UPDATE reservations SET status = 'Rejected' WHERE id = '$target_id'");
+        header("Location: index.php?msg=ReservationCancelled");
+        exit();
+    } elseif ($action_type === 'Schedule') {
+        // Suspends a single instance day of a recurring class schedule
+        $cancel_date = mysqli_real_escape_string($conn, $_POST['selected_cancel_date']);
+        if (!empty($cancel_date)) {
+            $conn->query("INSERT IGNORE INTO cancelled_classes (schedule_id, cancelled_date) VALUES ('$target_id', '$cancel_date')");
+            header("Location: index.php?msg=ClassSuspended");
+            exit();
+        }
+    }
+}
+
+// --- Strictly Enforced First-Come, First-Served Reservation Approval Handler ---
+if (isset($_POST['update_reservation_status'])) {
+    $reservation_id = mysqli_real_escape_string($conn, $_POST['reservation_id']);
+
+    // Read the button value clicked ('Accepted' or 'Rejected')
+    $new_status = mysqli_real_escape_string($conn, $_POST['update_reservation_status']);
+
+    if ($new_status === 'Accepted') {
+        // 1. Fetch the room name, date, start time, and end time of the reservation Engr. Liza is approving
+        $current_res_query = $conn->query("SELECT room_name, reservation_date, start_time, end_time, created_at FROM reservations WHERE id = '$reservation_id' LIMIT 1");
+        $current_res = $current_res_query->fetch_assoc();
+
+        if ($current_res) {
+            $room_name = mysqli_real_escape_string($conn, $current_res['room_name']);
+            $res_date  = mysqli_real_escape_string($conn, $current_res['reservation_date']);
+            $start_t   = mysqli_real_escape_string($conn, $current_res['start_time']);
+            $end_t     = mysqli_real_escape_string($conn, $current_res['end_time']);
+            $created_at = $current_res['created_at'];
+
+            // 2. FIRST-COME, FIRST-SERVED QUEUE CHECK: 
+            // Scan for any OLDER pending requests for the EXACT same room
+            $check_older_query = $conn->query("
+                SELECT id FROM reservations 
+                WHERE room_name = '$room_name' 
+                AND status = 'Pending' 
+                AND created_at < '$created_at' 
+                AND id != '$reservation_id'
+                LIMIT 1
+            ");
+
+            if ($check_older_query->num_rows > 0) {
+                // Block Engr. Liza from bypassing queue priority order!
+                header("Location: index.php?msg=BlockFirstComeFirstServe");
+                exit();
+            }
+
+            // 3. SECURE TRANSACTION: Begin database link to avoid race-conditions/double booking
+            $conn->begin_transaction();
+
+            try {
+                // A: Accept the targeted reservation request
+                $conn->query("UPDATE reservations SET status = 'Accepted' WHERE id = '$reservation_id'");
+
+                // B: AUTO-DECLINE OVERLAPPING ENTRIES: 
+                // Find all OTHER pending requests for this exact room/date that overlap in time and auto-decline them
+                // Time formula: (RequestedStart < ExistingEnd) AND (RequestedEnd > ExistingStart)
+                $conn->query("
+                    UPDATE reservations 
+                    SET status = 'Declined' 
+                    WHERE room_name = '$room_name' 
+                    AND reservation_date = '$res_date' 
+                    AND status = 'Pending'
+                    AND id != '$reservation_id'
+                    AND ('$start_t' < end_time AND '$end_t' > start_time)
+                ");
+
+                // Commit the changes to the database cleanly
+                $conn->commit();
+                header("Location: index.php?msg=ReservationApproved");
+                exit();
+            } catch (Exception $e) {
+                // Roll back if anything crashes
+                $conn->rollback();
+                header("Location: index.php?msg=DatabaseError");
+                exit();
+            }
+        }
+    } else {
+        // If Engr. Liza clicked "Decline", simply change this single status to 'Rejected'
+        $conn->query("UPDATE reservations SET status = 'Rejected' WHERE id = '$reservation_id'");
+        header("Location: index.php?msg=ReservationRejected");
+        exit();
+    }
+}
+
+// --- DATA FETCHING (OPTIMIZED FOR DISCRETE ACTIONS) ---
 $query = "
-    SELECT id, room_name, reservation_date AS event_date, start_time, end_time, 
-           'N/A' as subject_code, 'Reservation' as subject_name, 'Reservation' as section_name, 'N/A' as professor_name, 
-           'Reservation' as type, NULL as schedule_id, NULL as is_cancelled_date
-    FROM reservations 
-    WHERE status = 'Accepted'
+    SELECT r.id, TRIM(r.room_name) AS room_name, r.reservation_date AS event_date, r.start_time, r.end_time, 
+           'RESERVED' as subject_code, 
+           r.purpose as subject_name, 
+           IFNULL(u.section_name, 'Booking') as section_name, 
+           IFNULL(u.name, 'Unknown User') as professor_name, 
+           'Reservation' as type, r.id as schedule_id, NULL as is_cancelled_date
+    FROM reservations r
+    LEFT JOIN users u ON r.id_number = u.id_number
+    WHERE r.status = 'Accepted'
     
     UNION ALL
     
-    SELECT cs.id, cs.room_name, cs.day_of_week AS event_date, cs.start_time, cs.end_time, 
+    SELECT cs.id, TRIM(cs.room_name) AS room_name, cs.day_of_week AS event_date, cs.start_time, cs.end_time, 
            cs.subject_code, cs.subject_name, cs.section_name, cs.professor_name, 'Schedule' as type,
            cs.id as schedule_id, cc.cancelled_date as is_cancelled_date
     FROM class_schedules cs
@@ -55,13 +161,12 @@ $result = mysqli_query($conn, $query);
 
 $calendar_events = [];
 while ($row = mysqli_fetch_assoc($result)) {
-    // NEW CHECKPOINT: If this specific row represents a class that was cancelled for a date, 
-    // skip adding it to the calendar array so it disappears from the admin dashboard!
+    // Skip adding explicitly suspended calendar blocks
     if ($row['type'] === 'Schedule' && !empty($row['is_cancelled_date'])) {
-        continue; 
+        continue;
     }
 
-    $color = '#800000';
+    $color = '#800000'; // Default Maroon
     $room = strtolower($row['room_name']);
     if (strpos($room, 'lab') !== false) {
         $color = '#28a745';
@@ -78,11 +183,13 @@ while ($row = mysqli_fetch_assoc($result)) {
         'borderColor' => $color,
         'display' => 'block',
         'extendedProps' => [
+            'id'           => $row['id'],
             'subject'      => $row['subject_code'],
-            'subject_name' => $row['subject_name'], // <-- CHANGED: Now passing the descriptive subject name out!
+            'subject_name' => $row['subject_name'],
             'section'      => $row['section_name'],
             'professor'    => $row['professor_name'],
-            'type'         => $row['type'] // Helps your JavaScript differentiate scripts
+            'type'         => $row['type'],
+            'schedule_id'  => $row['schedule_id']
         ]
     ];
 
@@ -99,7 +206,7 @@ while ($row = mysqli_fetch_assoc($result)) {
         $event['end'] = $row['event_date'] . 'T' . $row['end_time'];
     }
     $calendar_events[] = $event;
-} 
+}
 
 $rooms_res = $conn->query("SELECT room_name FROM classrooms ORDER BY room_name ASC");
 $rooms_array = [];
@@ -107,8 +214,16 @@ while ($r = $rooms_res->fetch_assoc()) {
     $rooms_array[] = $r['room_name'];
 }
 
-// 1. ADDED FOR STEP B: Fetch professors list to populate our data layout
 $professors_res = $conn->query("SELECT id_number, name, section_name FROM users WHERE role = 'professor' ORDER BY name ASC");
+
+// Fetch Pending Reservations Queue Sorted strictly oldest first
+$pending_requests = $conn->query("
+    SELECT r.*, u.name as applicant_name, u.section_name as applicant_section
+    FROM reservations r
+    LEFT JOIN users u ON r.id_number = u.id_number
+    WHERE r.status = 'Pending'
+    ORDER BY r.created_at ASC
+");
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -119,6 +234,7 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
     <title>Admin Dashboard | PUP-STC CMS</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="icon" type="image/png" href="../img/PUPLogo.png">
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
     <style>
         :root {
@@ -139,7 +255,6 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
         }
 
-        /* Sidebar Styling */
         .sidebar-card {
             border: none;
             border-radius: 12px;
@@ -230,6 +345,16 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
             padding: 6px 15px;
         }
 
+        .fc-event {
+            cursor: pointer !important;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .fc-event:hover {
+            transform: scale(1.015);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+        }
+
         @media (max-width: 767px) {
             .calendar-container {
                 padding: 10px;
@@ -275,15 +400,12 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
             }
         }
 
-        /* RESPONSIVE FACULTY DIRECTORY */
+        /* RESPONSIVE DIRECTORY TABLES */
         @media (max-width: 767px) {
-
-            /* Hide the traditional table header layout on mobile */
             .table-responsive thead {
                 display: none;
             }
 
-            /* Force table elements to behave like block cards */
             .table-responsive table,
             .table-responsive tbody,
             .table-responsive tr,
@@ -292,7 +414,6 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                 width: 100%;
             }
 
-            /* Separate each professor row into an independent card block */
             .table-responsive tr {
                 background: #ffffff;
                 border: 1px solid #e0e0e0;
@@ -302,14 +423,12 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                 box-shadow: 0 2px 5px rgba(0, 0, 0, 0.02);
             }
 
-            /* Remove default padding borders between cells */
             .table-responsive td {
                 text-align: left;
                 padding: 6px 4px !important;
                 border: none !important;
             }
 
-            /* Use data-label attributes to add a clean pseudo-header on the left */
             .table-responsive td::before {
                 content: attr(data-label);
                 float: left;
@@ -320,15 +439,14 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                 width: 40%;
             }
 
-            /* Align the data contents cleanly to the right of our label */
             .table-responsive td>div,
             .table-responsive td>code,
-            .table-responsive td>span {
+            .table-responsive td>span,
+            .table-responsive td>form {
                 display: inline-block;
                 width: 60%;
             }
 
-            /* Fix centering for account status badge alignment */
             .table-responsive td.text-center {
                 text-align: left !important;
             }
@@ -360,12 +478,39 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
         </div>
     </nav>
 
-    <?php if (isset($_GET['msg']) && $_GET['msg'] === 'ProfAdded' && isset($_GET['id'])): ?>
+    <?php if (isset($_GET['msg'])): ?>
         <div class="container-fluid px-4 mb-3">
-            <div class="alert alert-success alert-dismissible fade show shadow-sm border-start border-success border-4" role="alert">
-                <i class="fas fa-check-circle me-2"></i><strong>Professor Registered!</strong> Account generated with ID: <code class="bg-dark text-white px-2 py-0.5 rounded"><?php echo htmlspecialchars($_GET['id']); ?></code> (Default Pass: <code>prof123</code>).
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
+            <?php if ($_GET['msg'] === 'ProfAdded' && isset($_GET['id'])): ?>
+                <div class="alert alert-success alert-dismissible fade show shadow-sm border-start border-success border-4" role="alert">
+                    <i class="fas fa-check-circle me-2"></i><strong>Professor Registered!</strong> Account generated with ID: <code class="bg-dark text-white px-2 py-0.5 rounded"><?php echo htmlspecialchars($_GET['id']); ?></code> (Default Pass: <code>prof123</code>).
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php elseif ($_GET['msg'] === 'ClassSuspended'): ?>
+                <div class="alert alert-warning alert-dismissible fade show shadow-sm border-start border-warning border-4" role="alert">
+                    <i class="fas fa-ban me-2"></i><strong>Schedule Cancelled!</strong>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php elseif ($_GET['msg'] === 'ReservationCancelled'): ?>
+                <div class="alert alert-danger alert-dismissible fade show shadow-sm border-start border-danger border-4" role="alert">
+                    <i class="fas fa-times-circle me-2"></i><strong>Booking Discarded!</strong> The targeted room reservation has been rejected.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php elseif ($_GET['msg'] === 'BlockFirstComeFirstServe'): ?>
+                <div class="alert alert-danger alert-dismissible fade show shadow-sm border-start border-danger border-4" role="alert">
+                    <i class="fas fa-exclamation-triangle me-2"></i><strong>Approval Blocked!</strong> There is an older pending reservation request for this room layout. You must accept or decline that request first to preserve the First-Come, First-Served requirement.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php elseif ($_GET['msg'] === 'ReservationApproved'): ?>
+                <div class="alert alert-success alert-dismissible fade show shadow-sm border-start border-success border-4" role="alert">
+                    <i class="fas fa-check me-2"></i><strong>Reservation Confirmed!</strong> The request has been cleanly accepted and plotted.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php elseif ($_GET['msg'] === 'ReservationRejected'): ?>
+                <div class="alert alert-secondary alert-dismissible fade show shadow-sm border-start border-secondary border-4" role="alert">
+                    <i class="fas fa-times me-2"></i><strong>Reservation Declined!</strong> The booking request was discarded.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php endif; ?>
         </div>
     <?php endif; ?>
 
@@ -398,6 +543,67 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                     <div id="calendar"></div>
                 </div>
 
+                <div class="card border-0 shadow-sm mt-4" style="border-radius: 15px;">
+                    <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
+                        <h5 class="fw-bold m-0 text-dark"><i class="fas fa-clipboard-check me-2" style="color: var(--pup-maroon);"></i>Pending Reservations Queue</h5>
+                        <span class="badge bg-danger text-white fw-semibold px-3 py-2"><?php echo $pending_requests->num_rows; ?> Needs Review</span>
+                    </div>
+                    <div class="table-responsive px-4 pb-4">
+                        <table class="table align-middle table-hover mb-0">
+                            <thead class="table-light small text-uppercase fw-bold text-muted">
+                                <tr>
+                                    <th>Room</th>
+                                    <th>Applicant Profile</th>
+                                    <th>Time Frame Request</th>
+                                    <th>Submitted On</th>
+                                    <th>Purpose State</th>
+                                    <th class="text-center">Action Framework</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if ($pending_requests->num_rows > 0): ?>
+                                    <?php while ($req = $pending_requests->fetch_assoc()): ?>
+                                        <tr>
+                                            <td data-label="Room Targeted">
+                                                <span class="fw-bold text-dark"><i class="fas fa-door-closed me-2 text-secondary"></i><?php echo htmlspecialchars($req['room_name']); ?></span>
+                                            </td>
+                                            <td data-label="Applicant Profile">
+                                                <div class="fw-bold text-secondary"><?php echo htmlspecialchars($req['applicant_name'] ?? 'Unknown User'); ?></div>
+                                                <small class="text-muted"><?php echo htmlspecialchars($req['applicant_section'] ?? 'N/A'); ?></small>
+                                            </td>
+                                            <td data-label="Time Frame Request">
+                                                <div class="small fw-semibold text-dark"><i class="far fa-calendar-alt me-1 text-muted"></i> <?php echo date('M d, Y', strtotime($req['reservation_date'])); ?></div>
+                                                <div class="small text-muted"><i class="far fa-clock me-1 text-muted"></i> <?php echo date('h:i A', strtotime($req['start_time'])) . ' - ' . date('h:i A', strtotime($req['end_time'])); ?></div>
+                                            </td>
+                                            <td data-label="Submitted On">
+                                                <span class="badge bg-light text-dark border"><i class="fas fa-hourglass-start me-1 text-warning"></i> <?php echo date('M d, Y - h:i A', strtotime($req['created_at'])); ?></span>
+                                            </td>
+                                            <td data-label="Purpose State">
+                                                <span class="small text-muted" title="<?php echo htmlspecialchars($req['purpose']); ?>"><?php echo htmlspecialchars(substr($req['purpose'], 0, 30)) . (strlen($req['purpose']) > 30 ? '...' : ''); ?></span>
+                                            </td>
+                                            <td class="text-center" data-label="Action Framework">
+                                                <form method="POST" class="d-inline-flex gap-2">
+                                                    <input type="hidden" name="reservation_id" value="<?php echo $req['id']; ?>">
+                                                    <button type="submit" name="update_reservation_status" value="Accepted" class="btn btn-sm btn-success px-3 rounded-pill fw-semibold">
+                                                        <i class="fas fa-check me-1"></i> Accept
+                                                    </button>
+                                                    <button type="submit" name="update_reservation_status" value="Rejected" class="btn btn-sm btn-outline-danger px-3 rounded-pill fw-semibold">
+                                                        <i class="fas fa-times me-1"></i> Decline
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    <?php endwhile; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="6" class="text-center py-4 text-muted small"><i class="fas fa-inbox d-block mb-2 fs-4"></i> No pending room allocation tracks waiting for review.</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <div class="card border-0 shadow-sm mt-4 mb-5" style="border-radius: 15px;">
                     <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
                         <h5 class="fw-bold m-0 text-dark"><i class="fas fa-user-tie me-2" style="color: var(--pup-maroon);"></i>Registered Faculty</h5>
@@ -417,7 +623,7 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                                 <?php if ($professors_res->num_rows > 0): ?>
                                     <?php while ($prof = $professors_res->fetch_assoc()): ?>
                                         <tr>
-                                            <td>
+                                            <td data-label="Professor Name">
                                                 <div class="d-flex align-items-center">
                                                     <div class="rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 35px; height: 35px; background: #fff5f5;">
                                                         <i class="fas fa-user text-danger small"></i>
@@ -425,20 +631,20 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                                                     <span class="fw-bold text-secondary small"><?php echo htmlspecialchars($prof['name']); ?></span>
                                                 </div>
                                             </td>
-                                            <td>
+                                            <td data-label="Generated Account ID">
                                                 <code class="fw-bold text-dark bg-light px-2 py-1 rounded border"><?php echo htmlspecialchars($prof['id_number']); ?></code>
                                             </td>
-                                            <td>
+                                            <td data-label="Department">
                                                 <span class="badge bg-light text-secondary border small"><?php echo htmlspecialchars($prof['section_name'] ?? 'General Faculty'); ?></span>
                                             </td>
-                                            <td class="text-center">
+                                            <td class="text-center" data-label="Account Status">
                                                 <span class="small text-success fw-bold"><i class="fas fa-circle me-1 small" style="font-size: 0.5rem;"></i> Active</span>
                                             </td>
                                         </tr>
                                     <?php endwhile; ?>
                                 <?php else: ?>
                                     <tr>
-                                        <td colspan="4" class="text-center py-4 text-muted small">No professor accounts found in the system. Use the sidebar button to add one.</td>
+                                        <td colspan="4" class="text-center py-4 text-muted small">No professor accounts found in the system.</td>
                                     </tr>
                                 <?php endif; ?>
                             </tbody>
@@ -458,9 +664,21 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                 </div>
                 <form method="POST">
                     <div class="modal-body p-4">
-                        <label class="form-label fw-bold">Room Name / Number</label>
-                        <input type="text" name="room_name" class="form-control" placeholder="e.g., Computer Lab 3" required>
-                        <small class="text-muted mt-2 d-block">Ensure the name matches your CSV headers.</small>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Room Name / Number</label>
+                            <input type="text" name="room_name" class="form-control" placeholder="e.g., NB 101" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Location Structure</label>
+                            <input type="text" name="location" class="form-control" placeholder="e.g., Main Building, 1st Floor" required>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label fw-bold">Room Type Classification</label>
+                            <select name="room_type" class="form-select" required>
+                                <option value="Classroom">Classroom Block</option>
+                                <option value="lab">Laboratory Unit (lab)</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="modal-footer border-0">
                         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
@@ -508,7 +726,7 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
             <div class="modal-content border-0 shadow">
                 <div class="modal-header">
                     <h5 class="modal-title">Upload Schedule</h5>
-                    <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <form action="./upload_handler.php" method="POST" enctype="multipart/form-data">
                     <div class="modal-body p-4">
@@ -522,6 +740,45 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                     </div>
                     <div class="modal-footer">
                         <button type="submit" class="btn btn-danger px-4">Process Upload</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="adminActionModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2 text-warning"></i>Manage Cancellation</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST">
+                    <div class="modal-body p-4">
+                        <input type="hidden" name="action_type" id="modalActionType">
+                        <input type="hidden" name="target_id" id="modalTargetId">
+
+                        <p class="mb-2">You are cancelling this <strong id="infoBlockType" class="text-uppercase text-danger"></strong></p>
+
+                        <div class="p-3 bg-light rounded border mb-3">
+                            <div class="small fw-bold mb-1 text-dark" id="infoSubject"></div>
+                            <div class="text-muted small" id="infoProfessor"></div>
+                            <div class="text-muted small" id="infoSection"></div>
+                        </div>
+
+                        <div id="classDateInputGroup" style="display: none;">
+                            <label class="form-label fw-bold text-dark">Specify Effective Cancellation Date:</label>
+                            <input type="date" name="selected_cancel_date" id="selected_cancel_date" class="form-control" value="<?php echo date('Y-m-d'); ?>">
+                            <small class="text-muted d-block mt-1">This room instance slot will open up exclusively for this calendar date.</small>
+                        </div>
+
+                        <div id="reservationNoticeGroup" style="display: none;">
+                            <p class="text-muted small mb-0">Proceeding will reject this booking reservation track and clear the space layout completely.</p>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0 bg-light">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="submit" name="admin_cancel_action" class="btn btn-danger px-4">Confirm Cancellation</button>
                     </div>
                 </form>
             </div>
@@ -556,28 +813,70 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
 
             var calendar = new FullCalendar.Calendar(calendarEl, {
                 initialView: isMobile ? 'timeGridDay' : 'timeGridWeek',
-                slotMinTime: '07:00:00',
+                slotMinTime: '07:30:00',
                 slotMaxTime: '22:00:00',
                 allDaySlot: false,
                 height: 'auto',
                 stickyHeaderDates: true,
+
                 eventContent: function(arg) {
                     let subject = arg.event.extendedProps.subject || '';
                     let section = arg.event.extendedProps.section || '';
-                    let professor = arg.event.extendedProps.professor || ''; // <-- Fetch the prof name
+                    let professor = arg.event.extendedProps.professor || '';
+                    let durationHours = 2.0;
 
-                    // If it's a schedule, format a small layout string for the professor
-                    let profDisplay = (professor !== 'N/A' && professor !== '') ? `<div style="font-size: 1.1em; font-style: italic; opacity: 0.85;"><i class="fas fa-user-tie me-1"></i>${professor}</div>` : '';
+                    if (arg.event.start && arg.event.end) {
+                        durationHours = (arg.event.end - arg.event.start) / (1000 * 60 * 60);
+                    } else {
+                        let startTimeStr = arg.event.startStr || '';
+                        let endTimeStr = arg.event.endStr || '';
+
+                        if (startTimeStr && endTimeStr) {
+                            let startParts = startTimeStr.split(':').map(Number);
+                            let endParts = endTimeStr.split(':').map(Number);
+
+                            if (startParts.length >= 2 && endParts.length >= 2) {
+                                let startDecimal = startParts[0] + (startParts[1] / 60);
+                                let endDecimal = endParts[0] + (endParts[1] / 60);
+                                durationHours = endDecimal - startDecimal;
+                            }
+                        }
+                    }
+
+                    let timeSize = '1.3em',
+                        subjectSize = '1.4em',
+                        sectionSize = '1.2em',
+                        profSize = '1.1em';
+                    let showProfessor = true;
+
+                    if (durationHours <= 1.1) {
+                        timeSize = '0.8em';
+                        subjectSize = '0.85em';
+                        sectionSize = '0.8em';
+                        showProfessor = false;
+                    } else if (durationHours > 1.1 && durationHours <= 1.5) {
+                        timeSize = '0.95em';
+                        subjectSize = '1.05em';
+                        sectionSize = '0.85em';
+                        profSize = '0.8em';
+                    } else if (durationHours > 1.5 && durationHours <= 2.5) {
+                        timeSize = '1.15em';
+                        subjectSize = '1.2em';
+                        sectionSize = '1.0em';
+                        profSize = '0.9em';
+                    }
+
+                    let profDisplay = (professor !== 'N/A' && professor !== '' && showProfessor) ?
+                        `<div style="font-size: ${profSize}; font-style: italic; opacity: 0.85; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; margin-top: 1px;"><i class="fas fa-user-tie me-1"></i>${professor}</div>` : '';
 
                     return {
                         html: `
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; text-align: center; padding: 2px;">
-                <div style="font-size: 1.3em; font-weight: bold;">${arg.timeText}</div>
-                <div style="font-size: 1.4em; font-weight: 800; text-transform: uppercase;">${subject}</div>
-                <div style="font-size: 1.2em; opacity: 0.9;">${section}</div>
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; text-align: center; padding: 1px 2px; overflow: hidden; line-height: 1.1;">
+                <div style="font-size: ${timeSize}; font-weight: bold; margin-bottom: 1px;">${arg.timeText}</div>
+                <div style="font-size: ${subjectSize}; font-weight: 800; text-transform: uppercase; max-width: 100%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; margin-bottom: 1px;">${subject}</div>
+                <div style="font-size: ${sectionSize}; opacity: 0.9; font-weight: 600;">${section}</div>
                 ${profDisplay} 
-            </div>
-        `
+            </div>`
                     };
                 },
 
@@ -585,6 +884,35 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
                     left: 'roomSelectorBtn',
                     center: 'title',
                     right: isMobile ? 'prev,next' : ''
+                },
+
+                eventClick: function(info) {
+                    const props = info.event.extendedProps;
+
+                    document.getElementById('modalActionType').value = props.type;
+                    document.getElementById('modalTargetId').value = props.schedule_id;
+
+                    document.getElementById('infoBlockType').innerText = props.type;
+                    document.getElementById('infoSubject').innerText = (props.subject ? props.subject : '') + ' - ' + (props.subject_name ? props.subject_name : '');
+                    document.getElementById('infoProfessor').innerText = "Faculty: " + props.professor;
+                    document.getElementById('infoSection').innerText = "Allocated Group: " + props.section;
+
+                    const dateGroup = document.getElementById('classDateInputGroup');
+                    const noticeGroup = document.getElementById('reservationNoticeGroup');
+                    const dateInput = document.getElementById('selected_cancel_date');
+
+                    if (props.type === 'Schedule') {
+                        dateGroup.style.display = 'block';
+                        noticeGroup.style.display = 'none';
+                        dateInput.required = true;
+                    } else {
+                        dateGroup.style.display = 'none';
+                        noticeGroup.style.display = 'block';
+                        dateInput.required = false;
+                    }
+
+                    var myModal = new bootstrap.Modal(document.getElementById('adminActionModal'));
+                    myModal.show();
                 },
 
                 datesSet: function() {
@@ -633,7 +961,14 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
             calendar.render();
             window.currentCalendar = calendar;
 
-            if (roomsList.length > 0) updateTargetRoom(roomsList[0]);
+            const urlParams = new URLSearchParams(window.location.search);
+            const targetRoomParam = urlParams.get('room_id');
+
+            if (targetRoomParam) {
+                updateTargetRoom(targetRoomParam);
+            } else if (roomsList.length > 0) {
+                updateTargetRoom(roomsList[0]);
+            }
         });
 
         function updateTargetRoom(room) {
@@ -642,9 +977,9 @@ $professors_res = $conn->query("SELECT id_number, name, section_name FROM users 
             const modalDisplay = document.getElementById('modalRoomTarget');
             const hiddenInput = document.getElementById('hiddenRoomInput');
 
-            if (nameDisplay) nameDisplay.innerText = room;
-            if (modalDisplay) modalDisplay.innerText = room;
-            if (hiddenInput) hiddenInput.value = room;
+            if (nameDisplay) nameDisplay.innerText = cleanRoom;
+            if (modalDisplay) modalDisplay.innerText = cleanRoom;
+            if (hiddenInput) hiddenInput.value = cleanRoom;
 
             if (window.currentCalendar) {
                 window.currentCalendar.refetchEvents();
