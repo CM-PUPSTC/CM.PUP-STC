@@ -340,6 +340,21 @@ while ($row = mysqli_fetch_assoc($class_result)) {
             </div>
         </div>
     </div>
+    <div class="modal fade" id="universalConfirmModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-sm modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg text-center p-4">
+                <div class="mb-3 text-warning">
+                    <i class="fas fa-exclamation-circle fa-3x"></i>
+                </div>
+                <h5 class="fw-bold mb-2">Are you sure?</h5>
+                <p id="universalConfirmMessage" class="text-muted small mb-4">Do you really want to proceed with this action?</p>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-light btn-sm w-50 fw-semibold" data-bs-dismiss="modal">No, Go Back</button>
+                    <button type="button" id="universalConfirmBtn" class="btn btn-danger btn-sm w-50 fw-bold">Yes, Cancel It</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -663,7 +678,24 @@ while ($row = mysqli_fetch_assoc($class_result)) {
         }
 
         function cancelReservation(refNo) {
-            if (confirm(`Are you sure you want to cancel reservation request #${refNo}?`)) {
+            // 1. Grab the modal elements
+            const confirmModalEl = document.getElementById('universalConfirmModal');
+            const msgEl = document.getElementById('universalConfirmMessage');
+            const actionBtn = document.getElementById('universalConfirmBtn');
+
+            // 2. Set custom text for this specific execution
+            msgEl.innerText = `Are you sure you want to cancel reservation request #${refNo}?`;
+
+            // 3. Initialize and display the Bootstrap modal
+            const bsConfirmModal = new bootstrap.Modal(confirmModalEl);
+            bsConfirmModal.show();
+
+            // 4. Overwrite the click action on the "Yes" button
+            actionBtn.onclick = function() {
+                // Immediately close the confirmation layout window
+                bsConfirmModal.hide();
+
+                // Proceed with your original fetch logic
                 const formData = new FormData();
                 formData.append('refNo', refNo);
 
@@ -677,17 +709,20 @@ while ($row = mysqli_fetch_assoc($class_result)) {
                         if (data.status === 'success') {
                             const reservation = myReservations.find(res => res.refNo === refNo);
                             if (reservation) reservation.status = 'cancelled';
+
+                            // Clean up any stray backdrops cleanly
                             const backdrops = document.querySelectorAll('.modal-backdrop, .modal-shadow');
                             backdrops.forEach(backdrop => backdrop.remove());
                             document.body.classList.remove('modal-open');
                             document.body.style.overflow = '';
+
                             renderStatusTable();
                         }
                     })
                     .catch(err => {
                         showNotify("Error processing cancellation request.", "error");
                     });
-            }
+            };
         }
 
         function updateAllTables() {

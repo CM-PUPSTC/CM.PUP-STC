@@ -15,32 +15,35 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (mysqli_num_rows($result) > 0) {
         $row = mysqli_fetch_assoc($result);
         
-        /* ====================================================================
-           UPDATED: SMART PASSWORD VERIFICATION
-           Checks via password_verify() first (for hashes), 
-           and falls back to === plain text (for older accounts).
-           ==================================================================== */
-        if (password_verify($password, $row['password']) || $password === $row['password']) { 
-            
-            // Set Session Variables
-            $_SESSION['account_id'] = $row['id']; 
-            $_SESSION['account_number'] = $row['id_number'];
-            $_SESSION['name'] = $row['name']; // Store name for the Prof Dashboard
-            $_SESSION['role'] = $row['role']; 
-            
-            session_regenerate_id(true);
-
-            // --- ROLE-BASED REDIRECTION ---
-            if ($row['role'] === 'admin') {
-                header("Location: admin/index.php");
-            } elseif ($row['role'] === 'professor') {
-                header("Location: professor/index.php");
-            } else {
-                header("Location: user/index.php"); // Default for students
-            }
-            exit();
-        } else {
+        // ====================================================================
+        // SEPARATION CRITERIA: Reject Admin accounts on this generic login route
+        // ====================================================================
+        if ($row['role'] === 'admin') {
             $error = "Invalid Password";
+        } else {
+            /* ====================================================================
+               SMART PASSWORD VERIFICATION
+               ==================================================================== */
+            if (password_verify($password, $row['password']) || $password === $row['password']) { 
+                
+                // Set Session Variables
+                $_SESSION['account_id'] = $row['id']; 
+                $_SESSION['account_number'] = $row['id_number'];
+                $_SESSION['name'] = $row['name']; 
+                $_SESSION['role'] = $row['role']; 
+                
+                session_regenerate_id(true);
+
+                // --- ROLE-BASED REDIRECTION (ADMIN REMOVED) ---
+                if ($row['role'] === 'professor') {
+                    header("Location: professor/index.php");
+                } else {
+                    header("Location: user/index.php"); // Default for students
+                }
+                exit();
+            } else {
+                $error = "Invalid Password";
+            }
         }
     } else {
         $error = "Invalid ID Number";
